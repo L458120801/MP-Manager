@@ -1933,6 +1933,7 @@ Layout Inspector
     <string name="progress_to">A</string>
     <string name="progress_stat_bytes">%1$d%% • %2$s / %3$s</string>
     <string name="progress_stat_items">%1$d / %2$d (%3$d%%)</string>
+    <string name="progress_stat_file_count">Archivos %1$d/%2$d</string>
     <string name="progress_stat_elapsed">%1$s transcurridos</string>
     <string name="progress_left_bytes">quedan %1$s</string>
     <string name="progress_left_items">quedan %1$d</string>

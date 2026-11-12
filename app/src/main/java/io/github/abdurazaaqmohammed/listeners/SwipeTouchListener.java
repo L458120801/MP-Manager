@@ -10,7 +10,7 @@ import androidx.core.view.GestureDetectorCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import io.github.abdurazaaqmohammed.MPManager.MainActivity;
-import io.github.abdurazaaqmohammed.adapters.main.MainFilesArrayAdapter;
+import io.github.abdurazaaqmohammed.adapters.MultiSelectableAdapter;
 
 
 public class SwipeTouchListener implements View.OnTouchListener {
@@ -24,7 +24,7 @@ public class SwipeTouchListener implements View.OnTouchListener {
     private final int position;
     private final PositionSource positionSource;
 
-    private Object arrayAdapter;
+    private MultiSelectableAdapter arrayAdapter;
     private int pane;
 
     public interface PositionSource {
@@ -48,7 +48,7 @@ public class SwipeTouchListener implements View.OnTouchListener {
                               View.OnClickListener clickListener,
                               View.OnLongClickListener longClickListener,
                               int position,
-                              Object arrayAdapter, int pane) {
+                              MultiSelectableAdapter arrayAdapter, int pane) {
         this(context, clickListener, longClickListener, null, position, arrayAdapter, pane);
     }
 
@@ -61,7 +61,7 @@ public class SwipeTouchListener implements View.OnTouchListener {
                               View.OnClickListener clickListener,
                               View.OnLongClickListener longClickListener,
                               PositionSource positionSource,
-                              Object arrayAdapter, int pane) {
+                              MultiSelectableAdapter arrayAdapter, int pane) {
         this(context, clickListener, longClickListener, positionSource, RecyclerView.NO_POSITION, arrayAdapter, pane);
     }
 
@@ -70,7 +70,7 @@ public class SwipeTouchListener implements View.OnTouchListener {
                                View.OnLongClickListener longClickListener,
                                PositionSource positionSource,
                                int position,
-                               Object arrayAdapter, int pane) {
+                               MultiSelectableAdapter arrayAdapter, int pane) {
         this.originalClickListener = clickListener;
         this.originalLongClickListener = longClickListener;
         this.position = position;
@@ -90,13 +90,14 @@ public class SwipeTouchListener implements View.OnTouchListener {
                     public boolean onSingleTapUp(@NonNull MotionEvent e) {
                         context.setCurrentPane(pane);
                         if (!isSwiping) {
-                            MainFilesArrayAdapter live = liveAdapter();
+                            MultiSelectableAdapter live = liveAdapter();
                             int pos = resolvePosition();
-                            if (live != null && live.isMultiSelectMode()) {
+                            if (live.isMultiSelectMode()) {
                                 if (pos != RecyclerView.NO_POSITION) live.handleMultiSelect(pos);
-                            } else {
-                                originalClickListener.onClick(null);
+                                gestureHandled = true;
+                                return true;
                             }
+                            originalClickListener.onClick(null);
                             gestureHandled = true;
                             return true;
                         }
@@ -132,14 +133,12 @@ public class SwipeTouchListener implements View.OnTouchListener {
      * different instance on every folder change. Rebinding here keeps swipes and
      * taps acting on the adapter that is actually on screen.
      */
-    public void rebind(Object arrayAdapter, int pane) {
+    public void rebind(MultiSelectableAdapter arrayAdapter, int pane) {
         this.arrayAdapter = arrayAdapter;
         this.pane = pane;
     }
 
-    private MainFilesArrayAdapter liveAdapter() {
-        return arrayAdapter instanceof MainFilesArrayAdapter a ? a : null;
-    }
+    private MultiSelectableAdapter liveAdapter() { return arrayAdapter; }
 
     @Override
     public boolean onTouch(View v, MotionEvent event) {
@@ -218,8 +217,8 @@ if (confirmed && event.getActionMasked() == MotionEvent.ACTION_UP) {
                                     .start();
 
                             int pos = resolvePosition();
-                            MainFilesArrayAdapter live = liveAdapter();
-                            if (live != null && pos != RecyclerView.NO_POSITION)
+                            MultiSelectableAdapter live = liveAdapter();
+                            if (pos != RecyclerView.NO_POSITION)
                                 live.handleSwipe(pos);
                         } else {
                         v.animate().translationX(0).setDuration(180).setInterpolator(new DecelerateInterpolator(1.5f)).start();

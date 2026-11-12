@@ -24,8 +24,19 @@ def main():
     if args.pid_file:
         args.pid_file.write_text(str(os.getpid()), encoding="ascii")
     with tempfile.TemporaryDirectory(prefix="mp-smb-test-") as root:
+        test_root = Path(root) / "test"
+        hidden_root = Path(root) / "hidden"
+        printer_root = Path(root) / "printer"
+        test_root.mkdir()
+        hidden_root.mkdir()
+        printer_root.mkdir()
         server = smbserver.SimpleSMBServer(listenAddress="127.0.0.1", listenPort=args.port)
-        server.addShare("test", root)
+        server.addShare("test", str(test_root))
+        server.addShare("hidden$", str(hidden_root))
+        server.addShare("printer", str(printer_root), shareType="1")
+        for index in range(20):
+            server.addShare(f"fragment-{index:03d}", str(test_root))
+        server._SimpleSMBServer__srvsServer._shares["PRINTER"]["share type"] = 1
         server.setSMB2Support(True)
         # Impacket 0.13.1 sends a READ response body with STATUS_END_OF_FILE.
         # MS-SMB2 requires an ERROR body for that status; strict clients otherwise

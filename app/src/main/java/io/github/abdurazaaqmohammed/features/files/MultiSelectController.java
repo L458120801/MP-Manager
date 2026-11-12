@@ -19,9 +19,9 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
+import io.github.abdurazaaqmohammed.adapters.MultiSelectableAdapter;
 import io.github.abdurazaaqmohammed.MPManager.MainActivity;
 import io.github.abdurazaaqmohammed.MPManager.R;
-import io.github.abdurazaaqmohammed.adapters.main.MainFilesArrayAdapter;
 import io.github.abdurazaaqmohammed.utils.LegacyUtils;
 import io.github.codehasan.colorpicker.extensions.Extensions;
 
@@ -45,8 +45,8 @@ public class MultiSelectController {
 
     public void clearPaneSelection(boolean pane1) {
         try {
-            RecyclerView paneView = activity.findViewById(pane1 ? R.id.listViewPane1 : R.id.listViewPane2);
-            if (paneView != null && paneView.getAdapter() instanceof MainFilesArrayAdapter a) a.clearSelection();
+            MultiSelectableAdapter adapter = getSelectableAdapter(pane1 ? 1 : 2);
+            if (adapter != null) adapter.clearSelection();
             else setMultiSelectModeUI(false);
         } catch (Exception ignored) {
         }
@@ -113,9 +113,9 @@ public class MultiSelectController {
     private void buildMultiSelectButtons() {
         int[] icons = {R.drawable.baseline_select_all_24, R.drawable.tab_inactive_24px, R.drawable.flip_24px, R.drawable.baseline_info_24};
         View.OnClickListener[] listeners = {
-                v -> { for (MainFilesArrayAdapter a : activeMultiSelectAdapters()) a.selectAll(); },
-                v -> { for (MainFilesArrayAdapter a : activeMultiSelectAdapters()) a.invertSelection(); },
-                v -> { for (MainFilesArrayAdapter a : activeMultiSelectAdapters()) a.selectSameType(); },
+                v -> { for (MultiSelectableAdapter a : activeMultiSelectAdapters()) a.selectAll(); },
+                v -> { for (MultiSelectableAdapter a : activeMultiSelectAdapters()) a.invertSelection(); },
+                v -> { for (MultiSelectableAdapter a : activeMultiSelectAdapters()) a.selectSameType(); },
                 v -> new MaterialAlertDialogBuilder(activity)
                         .setTitle(R.string.multi_select)
                         .setMessage(activity.getString(R.string.multiselect_hint))
@@ -148,14 +148,15 @@ public class MultiSelectController {
         }
     }
 
-    private MainFilesArrayAdapter getMainFilesAdapter(int pane) {
+    private MultiSelectableAdapter getSelectableAdapter(int pane) {
         RecyclerView paneView = activity.findViewById(pane == 1 ? R.id.listViewPane1 : R.id.listViewPane2);
-        RecyclerView.Adapter a = paneView.getAdapter();
-        return a instanceof MainFilesArrayAdapter ? (MainFilesArrayAdapter) a : null;
+        RecyclerView.Adapter<?> adapter = paneView.getAdapter();
+        return adapter instanceof MultiSelectableAdapter selectable && selectable.supportsMultiSelect()
+                ? selectable : null;
     }
 
     public void onPaneTouched(int pane) {
-        MainFilesArrayAdapter a = getMainFilesAdapter(pane);
+        MultiSelectableAdapter a = getSelectableAdapter(pane);
         setMultiSelectModeUI(a != null && a.isMultiSelectMode());
     }
 
@@ -164,14 +165,15 @@ public class MultiSelectController {
     }
 
     public void exitAll() {
-        for (MainFilesArrayAdapter a : activeMultiSelectAdapters()) a.exitMultiSelectMode();
+        for (MultiSelectableAdapter a : activeMultiSelectAdapters()) a.exitMultiSelectMode();
     }
 
-    private List<MainFilesArrayAdapter> activeMultiSelectAdapters() {
-        List<MainFilesArrayAdapter> out = new ArrayList<>();
+    private List<MultiSelectableAdapter> activeMultiSelectAdapters() {
+        List<MultiSelectableAdapter> out = new ArrayList<>();
         for (int id : new int[]{R.id.listViewPane1, R.id.listViewPane2}) {
             RecyclerView pane = activity.findViewById(id);
-            if (pane.getAdapter() instanceof MainFilesArrayAdapter adapter && adapter.isMultiSelectMode())
+            if (pane.getAdapter() instanceof MultiSelectableAdapter adapter
+                    && adapter.supportsMultiSelect() && adapter.isMultiSelectMode())
                 out.add(adapter);
         }
         return out;

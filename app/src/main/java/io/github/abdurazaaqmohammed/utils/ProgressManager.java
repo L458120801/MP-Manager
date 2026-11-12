@@ -27,6 +27,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import io.github.abdurazaaqmohammed.MPManager.R;
@@ -90,6 +91,8 @@ public class ProgressManager {
     private volatile long bytesDone;
     /** Negative until a byte total is known. */
     private volatile long bytesTotal = -1L;
+    private volatile boolean megabyteUnits;
+    private volatile boolean showFileCount;
 
     private volatile boolean hidden;
     private volatile boolean dismissed;
@@ -101,6 +104,7 @@ public class ProgressManager {
     private long lastSampleItems;
     private double speedBps;
     private double itemRate;
+    private int completedFiles;
 
     private NotificationManagerCompat nm;
 
@@ -195,6 +199,16 @@ public class ProgressManager {
      */
     public ProgressManager setControllable(boolean controllable) {
         this.controllable = controllable;
+        return this;
+    }
+
+    public ProgressManager setMegabyteUnits(boolean enabled) {
+        megabyteUnits = enabled;
+        return this;
+    }
+
+    public ProgressManager setShowFileCount(boolean enabled) {
+        showFileCount = enabled;
         return this;
     }
 
@@ -438,6 +452,11 @@ public class ProgressManager {
             @Override
             public void onBytes(long count) {
                 addBytes(count);
+            }
+
+            @Override
+            public void onFileComplete() {
+                if (showFileCount && maxVal > 0) setItems(Math.min(++completedFiles, maxVal), maxVal);
             }
 
             @Override
@@ -719,6 +738,10 @@ public class ProgressManager {
             sb.append(activity.getString(R.string.progress_stat_bytes,
                     percent(), formatSize(bytesDone), formatSize(bytesTotal)));
             long left = bytesTotal - bytesDone;
+            if (showFileCount && maxVal > 0) {
+                sb.append(" | ").append(activity.getString(R.string.progress_stat_file_count,
+                        Math.min(progressVal, maxVal), maxVal));
+            }
             if (left > 0) {
                 sb.append(" • ").append(activity.getString(R.string.progress_left_bytes, formatSize(left)));
             }
@@ -775,6 +798,7 @@ public class ProgressManager {
 
     private String formatSize(long bytes) {
         if (bytes < 0) bytes = 0;
+        if (megabyteUnits) return String.format(Locale.getDefault(), "%.2f MB", bytes / (1024d * 1024d));
         return Formatter.formatShortFileSize(activity, bytes);
     }
 

@@ -23,11 +23,10 @@ public final class NetworkProfile {
                 throw new IllegalArgumentException("Enter an HTTP(S) collection URL without credentials, query or fragment");
         } else if (protocol.equals("smb")) {
             URI uri = smbUri();
-            RemotePath.validateName(share());
             if (!"smb".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
                     || uri.getQuery() != null || uri.getFragment() != null || uri.getPort() == 0
                     || uri.getPort() > 65535 || uri.getPort() < -1)
-                throw new IllegalArgumentException("Enter smb://host/share (optional :port)");
+                throw new IllegalArgumentException("Enter an SMB server address with a valid port");
         } else throw new IllegalArgumentException("Unknown network protocol");
         if (name.trim().isEmpty()) name = address;
     }
@@ -37,21 +36,13 @@ public final class NetworkProfile {
         catch (Exception e) { throw new IllegalArgumentException("Invalid SMB URL", e); }
     }
 
-    public String share() {
-        String path = smbUri().getPath();
-        if (path == null || !path.startsWith("/")) throw new IllegalArgumentException("An SMB share is required");
-        String share = path.substring(1);
-        if (share.endsWith("/")) share = share.substring(0, share.length() - 1);
-        return share;
-    }
-
     public RemoteClient connect() throws java.io.IOException {
         validate();
         if (protocol.equals("webdav")) return new WebDavClient(address, username, password);
         URI uri = smbUri();
         String host = uri.getHost();
         if (host.startsWith("[") && host.endsWith("]")) host = host.substring(1, host.length() - 1);
-        return new SmbClient(host, uri.getPort() == -1 ? 445 : uri.getPort(), share(), username, password, domain);
+        return new SmbClient(host, uri.getPort() == -1 ? 445 : uri.getPort(), username, password, domain);
     }
 
     public String canonicalAddress() {
@@ -64,7 +55,7 @@ public final class NetworkProfile {
         URI uri = smbUri();
         try {
             return new URI("smb", null, uri.getHost().toLowerCase(java.util.Locale.ROOT),
-                    uri.getPort() == 445 ? -1 : uri.getPort(), "/" + share() + "/", null, null).toASCIIString();
+                    uri.getPort() == 445 ? -1 : uri.getPort(), "/", null, null).toASCIIString();
         } catch (java.net.URISyntaxException e) { throw new IllegalArgumentException("Invalid SMB URL", e); }
     }
 }

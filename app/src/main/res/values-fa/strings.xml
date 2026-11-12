@@ -1955,6 +1955,7 @@ com/gms/
     <string name="progress_to">به</string>
     <string name="progress_stat_bytes">%1$d%% • %2$s / %3$s</string>
     <string name="progress_stat_items">%1$d / %2$d (%3$d%%)</string>
+    <string name="progress_stat_file_count">پرونده‌ها %1$d/%2$d</string>
     <string name="progress_stat_elapsed">%1$s سپری شد</string>
     <string name="progress_left_bytes">%1$s مانده</string>
     <string name="progress_left_items">%1$d مانده</string>

@@ -1938,6 +1938,7 @@ Layout Inspector
     <string name="progress_to">到</string>
     <string name="progress_stat_bytes">%1$d%% • %2$s / %3$s</string>
     <string name="progress_stat_items">%1$d / %2$d (%3$d%%)</string>
+    <string name="progress_stat_file_count">文件 %1$d/%2$d</string>
     <string name="progress_stat_elapsed">已用 %1$s</string>
     <string name="progress_left_bytes">剩余 %1$s</string>
     <string name="progress_left_items">剩余 %1$d</string>

@@ -51,6 +51,10 @@ public class FileUtils {
         /** {@code count} more bytes were written. */
         void onBytes(long count);
 
+        /** Called when one regular file has been transferred successfully. */
+        default void onFileComplete() {
+        }
+
         /**
          * Safe point where a long operation may be paused or cancelled.
          *

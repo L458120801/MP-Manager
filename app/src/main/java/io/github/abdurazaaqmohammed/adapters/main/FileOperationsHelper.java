@@ -54,6 +54,7 @@ import io.github.abdurazaaqmohammed.features.dex.DexTools;
 import io.github.abdurazaaqmohammed.MPManager.shizuku.ShizukuFileOps;
 import io.github.abdurazaaqmohammed.adapters.FtpFilesArrayAdapter;
 import io.github.abdurazaaqmohammed.features.files.network.RemoteFile;
+import io.github.abdurazaaqmohammed.features.files.network.SmbClient;
 import io.github.abdurazaaqmohammed.MPManager.ftp.FTPFileWrapper;
 import io.github.abdurazaaqmohammed.domain.files.ZipEntryInfo;
 import io.github.abdurazaaqmohammed.utils.ArchiveUtil;
@@ -480,7 +481,8 @@ public class FileOperationsHelper {
 
     private boolean moveToDestination(List<Object> items, File destinationFolder) throws IOException {
         if (destinationFolder instanceof RemoteFile remote) {
-            context.getNetwork().transferInto(items, remote, true, transferListener());
+            context.getNetwork().transferInto(items, remote, true,
+                    transferListener(remote.connection.client instanceof SmbClient));
             return true;
         }
         if (transferFromSafPane(items, true)) return true;
@@ -864,7 +866,8 @@ public class FileOperationsHelper {
 
     private boolean copyToDestination(List<Object> items, File destinationFolder) throws IOException {
         if (destinationFolder instanceof RemoteFile remote) {
-            context.getNetwork().transferInto(items, remote, false, transferListener());
+            context.getNetwork().transferInto(items, remote, false,
+                    transferListener(remote.connection.client instanceof SmbClient));
             return true;
         }
         if (transferFromSafPane(items, false)) return true;
@@ -1213,7 +1216,12 @@ public class FileOperationsHelper {
 
     /** Byte-reporting adapter for the dialog that owns the current transfer. */
     private FileUtils.TransferListener transferListener() {
+        return transferListener(false);
+    }
+
+    private FileUtils.TransferListener transferListener(boolean megabyteUnits) {
         ProgressManager pm = activeProgress;
+        if (pm != null) pm.setMegabyteUnits(megabyteUnits).setShowFileCount(megabyteUnits);
         return pm == null ? null : pm.listener();
     }
 

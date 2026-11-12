@@ -1,6 +1,6 @@
 package io.github.abdurazaaqmohammed.features.files.network;
 
-/** Protocol-independent paths, always relative to the configured collection/share. */
+/** Protocol-independent paths relative to the remote root; SMB paths begin with a share name. */
 public final class RemotePath {
     private RemotePath() {}
 

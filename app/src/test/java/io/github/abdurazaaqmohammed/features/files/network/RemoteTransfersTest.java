@@ -4,15 +4,23 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import com.hierynomus.mssmb2.SMB2Dialect;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import io.github.abdurazaaqmohammed.utils.FileUtils;
+import io.github.abdurazaaqmohammed.utils.TransferCancelledException;
+import io.github.abdurazaaqmohammed.utils.TransferControl;
 
 import static org.junit.Assert.*;
 
@@ -23,8 +31,10 @@ public class RemoteTransfersTest {
         final Map<String, byte[]> files = new LinkedHashMap<>();
         boolean failDownload;
         int deletes;
+        int lists;
         MemoryClient() { files.put("", null); }
         @Override public List<RemoteEntry> list(String directory) {
+            lists++;
             List<RemoteEntry> result = new ArrayList<>();
             for (String path : files.keySet()) if (!path.equals(directory) && RemotePath.parent(path).equals(directory)) result.add(stat(path));
             return result;
@@ -73,6 +83,31 @@ public class RemoteTransfersTest {
         assertEquals(1, client.deletes);
     }
 
+    @Test public void cancellingMoveSourceCleanupPreservesLaterSources() {
+        TransferControl control = new TransferControl();
+        MemoryClient client = new MemoryClient() {
+            @Override public void delete(String path, boolean directory) {
+                super.delete(path, directory);
+                if (deletes == 1) control.cancel();
+            }
+        };
+        client.files.put("first", new byte[]{1});
+        client.files.put("second", new byte[]{2});
+        RemoteFile.Connection connection = new RemoteFile.Connection(client, "smb://test/");
+        List<RemoteFile> sources = List.of(new RemoteFile(connection, client.stat("first")),
+                new RemoteFile(connection, client.stat("second")));
+        FileUtils.TransferListener listener = new FileUtils.TransferListener() {
+            @Override public void onFile(File source, File destination) {}
+            @Override public void onBytes(long count) {}
+            @Override public void checkpoint() { control.checkpoint(); }
+        };
+
+        assertThrows(TransferCancelledException.class, () -> RemoteTransfers.deleteMovedSources(sources, listener));
+        assertNull(client.stat("first"));
+        assertNotNull(client.stat("second"));
+        assertEquals(1, client.deletes);
+    }
+
     @Test public void failedRecursiveMoveKeepsEntireRemoteSubtree() throws Exception {
         MemoryClient client = new MemoryClient();
         client.files.put("source", null);
@@ -118,6 +153,49 @@ public class RemoteTransfersTest {
         assertThrows(IOException.class, () -> RemoteTransfers.upload(client, "", source));
     }
 
+    @Test public void preparedDownloadReusesItsTreeAndReportsFileAndByteProgress() throws Exception {
+        MemoryClient client = new MemoryClient();
+        client.files.put("source", null);
+        client.files.put("source/empty-folder", null);
+        client.files.put("source/sub", null);
+        client.files.put("source/sub/empty", new byte[0]);
+        client.files.put("source/sub/data", new byte[]{1, 2, 3});
+        RemoteTransfers.DownloadPlan plan = RemoteTransfers.prepareDownload(client, client.stat("source"), null);
+        int listedFolders = client.lists;
+        AtomicInteger bytes = new AtomicInteger();
+        AtomicInteger completed = new AtomicInteger();
+        RemoteTransfers.download(client, plan, new File(temporary.getRoot(), "planned"), new io.github.abdurazaaqmohammed.utils.FileUtils.TransferListener() {
+            @Override public void onFile(File source, File destination) {}
+            @Override public void onBytes(long count) { bytes.addAndGet((int) count); }
+            @Override public void onFileComplete() { completed.incrementAndGet(); }
+        }, true);
+        assertEquals(2, plan.measure.files);
+        assertEquals(3, plan.measure.bytes);
+        assertEquals(listedFolders, client.lists);
+        assertEquals(3, client.lists);
+        assertEquals(3, bytes.get());
+        assertEquals(2, completed.get());
+        assertTrue(new File(temporary.getRoot(), "planned/empty-folder").isDirectory());
+        assertArrayEquals(new byte[]{1, 2, 3}, Files.readAllBytes(new File(temporary.getRoot(), "planned/sub/data").toPath()));
+    }
+
+    @Test public void uploadReportsBytesAndCompletedFiles() throws Exception {
+        MemoryClient client = new MemoryClient();
+        File source = temporary.newFolder("upload-source");
+        Files.write(new File(source, "empty").toPath(), new byte[0]);
+        Files.write(new File(source, "data").toPath(), new byte[]{1, 2, 3});
+        AtomicInteger bytes = new AtomicInteger();
+        AtomicInteger completed = new AtomicInteger();
+        RemoteTransfers.upload(client, "", source, new io.github.abdurazaaqmohammed.utils.FileUtils.TransferListener() {
+            @Override public void onFile(File file, File destination) {}
+            @Override public void onBytes(long count) { bytes.addAndGet((int) count); }
+            @Override public void onFileComplete() { completed.incrementAndGet(); }
+        });
+        assertEquals(3, bytes.get());
+        assertEquals(2, completed.get());
+        assertArrayEquals(new byte[]{1, 2, 3}, client.files.get("upload-source/data"));
+    }
+
     @Test public void rejectUnsafeServerChildren() {
         assertThrows(IOException.class, () -> RemoteTransfers.requireChild("folder", new RemoteEntry("other/file", false, 1, 0)));
         assertThrows(IOException.class, () -> RemoteTransfers.requireChild("folder", new RemoteEntry("folder", true, 0, 0)));
@@ -139,13 +217,21 @@ public class RemoteTransfersTest {
         p.protocol = "smb";
         p.address = "smb://127.0.0.1:1445/Documents";
         p.validate();
-        assertEquals("Documents", p.share());
-        assertEquals("smb://127.0.0.1:1445/Documents/", p.canonicalAddress());
-        for (String bad : new String[]{"smb://host", "smb://host/", "smb://user:pass@host/share",
-                "smb://host/share/folder", "smb://host:0/share", "smb://host/share?password=secret"}) {
+        assertEquals("smb://127.0.0.1:1445/", p.canonicalAddress());
+        p.address = "smb://host/";
+        p.validate();
+        assertEquals("smb://host/", p.canonicalAddress());
+        for (String bad : new String[]{"smb://", "smb://user:pass@host/", "http://host/",
+                "smb://host:0/", "smb://host:65536/", "smb://host/?password=secret"}) {
             p.address = bad;
             assertThrows(IllegalArgumentException.class, p::validate);
         }
+    }
+
+    @Test public void smbClientUsesUnsignedSmb2DialectsOnly() {
+        com.hierynomus.smbj.SmbConfig config = SmbClient.smbConfig();
+        assertEquals(EnumSet.of(SMB2Dialect.SMB_2_1, SMB2Dialect.SMB_2_0_2), config.getSupportedDialects());
+        assertFalse(config.isSigningEnabled());
     }
 
     @Test public void classifyAndroid17LocalNetworksWithoutBlockingPublicServers() throws Exception {

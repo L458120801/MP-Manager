@@ -499,8 +499,9 @@ public final class SafFs {
                 }
             }
         } else {
-            copyFrom(source, destParent, null);
+            copyFrom(source, destParent, null, listener);
             if (listener != null) listener.onBytes(Math.max(1L, source.length()));
+            if (listener != null) listener.onFileComplete();
         }
     }
 

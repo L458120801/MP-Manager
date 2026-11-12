@@ -74,7 +74,8 @@ import io.github.abdurazaaqmohammed.utils.MimeUtil;
 import io.github.abdurazaaqmohammed.utils.UiPrefs;
 import io.github.codehasan.colorpicker.extensions.Extensions;
 
-public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAdapter.ViewHolder> {
+public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAdapter.ViewHolder>
+        implements io.github.abdurazaaqmohammed.adapters.MultiSelectableAdapter {
 
     private final MainActivity context;
     public final Object[] values;
@@ -130,6 +131,8 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
     public boolean isMultiSelectMode() {
         return isMultiSelectMode;
     }
+
+    @Override public boolean supportsMultiSelect() { return true; }
 
     public final Set<Integer> selectedPositions = new HashSet<>();
     private Integer rangeStartPosition = null;

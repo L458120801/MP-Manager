@@ -24,9 +24,11 @@ import io.github.abdurazaaqmohammed.adapters.main.MainFilesArrayAdapter;
 import io.github.abdurazaaqmohammed.data.prefs.SidebarPins;
 import io.github.abdurazaaqmohammed.utils.ErrorUtil;
 import io.github.abdurazaaqmohammed.utils.FileUtils;
+import io.github.abdurazaaqmohammed.utils.ProgressManager;
 import io.github.abdurazaaqmohammed.utils.RootStaging;
 import io.github.abdurazaaqmohammed.utils.SafFile;
 import io.github.abdurazaaqmohammed.utils.SafFs;
+import io.github.abdurazaaqmohammed.utils.TransferCancelledException;
 import io.github.codehasan.colorpicker.extensions.Extensions;
 
 public final class NetworkController {
@@ -214,6 +216,9 @@ public final class NetworkController {
     }
 
     @FunctionalInterface public interface Operation { void run() throws Exception; }
+    @FunctionalInterface private interface TransferOperation {
+        void run(ProgressManager progress, FileUtils.TransferListener listener) throws Exception;
+    }
 
     public void runOperation(String title, Operation operation, Runnable onSuccess) {
         if (closed) return;
@@ -235,6 +240,33 @@ public final class NetworkController {
                 if (task[0].isCancelled()) return;
                 if (error != null) showError(error);
                 else if (onSuccess != null) onSuccess.run();
+            });
+        });
+    }
+
+    private void runTransferOperation(String title, TransferOperation operation, Runnable onSuccess) {
+        if (closed) return;
+        ProgressManager progress = new ProgressManager(activity, true)
+                .setText(title).setMegabyteUnits(true).setShowFileCount(true).setControllable(true);
+        progress.show();
+        workers.submit(() -> {
+            Exception failure = null;
+            FileUtils.TransferListener listener = progress.listener();
+            try {
+                checkpoint();
+                operation.run(progress, listener);
+                listener.checkpoint();
+            } catch (Exception e) { failure = e; }
+            Exception error = failure;
+            activity.handler.post(() -> {
+                progress.onFinished();
+                progress.dismiss();
+                if (closed || activity.isDestroyed()) return;
+                if (error != null) {
+                    if (!TransferCancelledException.isCancellation(error)) showError(error);
+                    return;
+                }
+                if (onSuccess != null) onSuccess.run();
             });
         });
     }
@@ -271,7 +303,7 @@ public final class NetworkController {
                 uploadSource(source, destination.connection.client, destination.entry.path, listener);
                 checkpoint();
                 if (listener != null) listener.checkpoint();
-                if (move) deleteSource(source);
+                if (move) deleteSource(source, listener);
             }
         } finally { activity.handler.post(activity::refreshAllPanes); }
     }
@@ -308,60 +340,108 @@ public final class NetworkController {
                 // Provider metadata may not expose a reliable length: use chunked PUT.
                 destination.upload(path, monitored, source instanceof SafFile ? -1 : source.length());
             }
+            if (destination instanceof SmbClient && listener != null) listener.onFileComplete();
         }
     }
 
-    private void deleteSource(File source) throws IOException {
+    private void deleteSource(File source, FileUtils.TransferListener listener) throws IOException {
         if (source instanceof SafFile) {
             if (!SafFs.delete((SafFile) source)) throw new IOException("Uploaded, but could not delete source");
-        } else if (!FileUtils.deleteTree(source, null)) throw new IOException("Uploaded, but could not delete source");
+        } else if (!FileUtils.deleteTree(source, listener)) throw new IOException("Uploaded, but could not delete source");
     }
 
     public void copyOut(RemoteFile source, boolean sourcePane1, boolean move) {
+        copyOut(List.of(source), sourcePane1, move);
+    }
+
+    public void copyOut(List<RemoteFile> sources, boolean sourcePane1, boolean move) {
         File destination = sourcePane1 ? activity.pane2Folder : activity.pane1Folder;
         MainFilesArrayAdapter other = activity.paneFilesAdapter(!sourcePane1);
         androidx.recyclerview.widget.RecyclerView opposite = activity.findViewById(sourcePane1 ? R.id.listViewPane2 : R.id.listViewPane1);
         boolean supported = opposite.getAdapter() instanceof MainFilesArrayAdapter
                 || opposite.getAdapter() instanceof io.github.abdurazaaqmohammed.adapters.RemoteFilesArrayAdapter;
-        runOperation(activity.getString(move ? R.string.move : android.R.string.copy), () -> {
-            if (!supported || destination == null || destination instanceof io.github.abdurazaaqmohammed.MPManager.ftp.FTPFileWrapper
-                    || (other != null && other.isInZip))
-                throw new IOException("Choose a destination folder, not an archive");
+        String title = activity.getString(move ? R.string.move : android.R.string.copy);
+        boolean smbTransfer = (destination instanceof RemoteFile remote && remote.connection.client instanceof SmbClient)
+                || sources.stream().anyMatch(source -> source.connection.client instanceof SmbClient);
+        if (smbTransfer) {
+            runTransferOperation(title, (progress, listener) ->
+                    copyOutWork(sources, destination, other, supported, move, progress, listener), activity::refreshAllPanes);
+            return;
+        }
+        runOperation(title, () -> copyOutWork(sources, destination, other, supported, move, null, null),
+                activity::refreshAllPanes);
+    }
+
+    private void copyOutWork(List<RemoteFile> sources, File destination, MainFilesArrayAdapter other,
+                             boolean supported, boolean move, ProgressManager progress,
+                             FileUtils.TransferListener listener) throws Exception {
+        if (!supported || destination == null || destination instanceof io.github.abdurazaaqmohammed.MPManager.ftp.FTPFileWrapper
+                || (other != null && other.isInZip))
+            throw new IOException("Choose a destination folder, not an archive");
+        for (RemoteFile source : sources) {
             if (destination instanceof RemoteFile remote && remote.connection.address.equals(source.connection.address)
                     && (remote.entry.path.equals(source.entry.path) || remote.entry.path.startsWith(source.entry.path + "/")))
                 throw new IOException("Cannot copy a folder into itself");
-            if (destination instanceof RemoteFile || destination instanceof SafFile) {
-                File staging = makeStagingFolder();
-                try {
-                    File local = new File(staging, source.getName());
-                    RemoteTransfers.download(source.connection.client, source.entry, local);
-                    checkpoint();
-                    if (destination instanceof RemoteFile remote) {
-                        RemoteTransfers.upload(remote.connection.client, remote.entry.path, local);
-                    } else {
-                        List<SafFile> children = SafFs.children((SafFile) destination);
-                        if (children == null) throw new IOException("Cannot read destination folder");
-                        for (SafFile child : children) if (child.getName().equals(source.getName()))
-                            throw new IOException("Destination already exists");
-                        SafFs.copyFromRecursive(local, (SafFile) destination, null);
-                    }
-                } finally { FileUtils.deleteTree(staging, null); }
-            } else {
-                RemoteTransfers.download(source.connection.client, source.entry, new File(destination, source.getName()));
+            if (move && source.connection.client instanceof SmbClient && source.entry.path.indexOf('/') == -1)
+                throw new IOException("Cannot move a server share");
+        }
+
+        boolean staged = destination instanceof RemoteFile || destination instanceof SafFile;
+        List<RemoteTransfers.DownloadPlan> plans = new java.util.ArrayList<>();
+        if (progress != null) {
+            FileUtils.Measure measure = new FileUtils.Measure();
+            for (RemoteFile source : sources) {
+                RemoteTransfers.DownloadPlan plan = RemoteTransfers.prepareDownload(source.connection.client, source.entry, listener);
+                plans.add(plan);
+                measure.files += plan.measure.files;
+                measure.bytes += plan.measure.bytes;
             }
-            checkpoint();
-            if (move) source.connection.client.delete(source.entry.path, source.isDirectory());
-        }, activity::refreshAllPanes);
+            progress.setBytes(0L, measure.bytes * (staged ? 2 : 1));
+            progress.setItems(0, measure.files);
+        }
+
+        File staging = staged ? makeStagingFolder() : null;
+        try {
+            List<SafFile> destinationChildren = destination instanceof SafFile ? SafFs.children((SafFile) destination) : null;
+            if (destination instanceof SafFile && destinationChildren == null)
+                throw new IOException("Cannot read destination folder");
+            for (int i = 0; i < sources.size(); i++) {
+                RemoteFile source = sources.get(i);
+                File local = new File(staging == null ? destination : staging, source.getName());
+                if (progress == null) RemoteTransfers.download(source.connection.client, source.entry, local);
+                if (progress != null) RemoteTransfers.download(source.connection.client, plans.get(i), local, listener, !staged);
+                checkpoint();
+                if (listener != null) listener.checkpoint();
+                if (destination instanceof RemoteFile remote) {
+                    if (listener == null) RemoteTransfers.upload(remote.connection.client, remote.entry.path, local);
+                    if (listener != null) RemoteTransfers.upload(remote.connection.client, remote.entry.path, local, listener);
+                }
+                if (destination instanceof SafFile saf) {
+                    for (SafFile child : destinationChildren) if (child.getName().equals(source.getName()))
+                        throw new IOException("Destination already exists");
+                    SafFs.copyFromRecursive(local, saf, listener);
+                }
+            }
+            if (move) RemoteTransfers.deleteMovedSources(sources, listener);
+        } finally {
+            if (staging != null) FileUtils.deleteTree(staging, null);
+        }
     }
 
     public boolean canCopyOut(RemoteFile source, boolean sourcePane1) {
+        return canCopyOut(List.of(source), sourcePane1);
+    }
+
+    public boolean canCopyOut(List<RemoteFile> sources, boolean sourcePane1) {
         File destination = sourcePane1 ? activity.pane2Folder : activity.pane1Folder;
         MainFilesArrayAdapter other = activity.paneFilesAdapter(!sourcePane1);
         if (destination == null || destination instanceof io.github.abdurazaaqmohammed.MPManager.ftp.FTPFileWrapper
                 || (other != null && other.isInZip)) return false;
         if (destination instanceof RemoteFile remote) {
-            return !remote.connection.address.equals(source.connection.address)
-                    || (!remote.entry.path.equals(source.entry.path) && !remote.entry.path.startsWith(source.entry.path + "/"));
+            for (RemoteFile source : sources) if (remote.connection.address.equals(source.connection.address)
+                    && (remote.entry.path.equals(source.entry.path) || remote.entry.path.startsWith(source.entry.path + "/")))
+                return false;
+            return true;
         }
         return other != null;
     }
@@ -375,6 +455,19 @@ public final class NetworkController {
     /** A downloaded copy is intentionally local; edits require explicitly copying it back. */
     public void open(RemoteFile source, java.util.function.Consumer<File> opener) {
         File[] downloaded = {null};
+        if (source.connection.client instanceof SmbClient) {
+            runTransferOperation(activity.getString(R.string.network_downloading), (progress, listener) -> {
+                RemoteTransfers.DownloadPlan plan = RemoteTransfers.prepareDownload(source.connection.client, source.entry, listener);
+                progress.setBytes(0L, plan.measure.bytes);
+                progress.setItems(0, plan.measure.files);
+                File staging = makeStagingFolder();
+                try {
+                    downloaded[0] = new File(staging, source.getName());
+                    RemoteTransfers.download(source.connection.client, plan, downloaded[0], listener, true);
+                } catch (Exception e) { FileUtils.deleteTree(staging, null); throw e; }
+            }, () -> opener.accept(downloaded[0]));
+            return;
+        }
         runOperation(activity.getString(R.string.network_downloading), () -> {
             File staging = makeStagingFolder();
             try {

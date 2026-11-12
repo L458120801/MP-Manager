@@ -37,6 +37,9 @@
 -keepclassmembers class com.hierynomus.smbj.** {
     @net.engio.mbassy.listener.Handler <methods>;
 }
+-keep class net.engio.mbassy.dispatch.ReflectiveHandlerInvocation {
+    public <init>(net.engio.mbassy.subscription.SubscriptionContext);
+}
 -dontwarn javax.el.**
 -keep class io.github.abdurazaaqmohammed.utils.DnsManager$DnsProfile { *; }
 -keep class io.github.abdurazaaqmohammed.utils.RecycleBin$Meta { *; }

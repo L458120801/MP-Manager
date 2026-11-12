@@ -303,7 +303,11 @@ public final class WebDavClient implements RemoteClient {
     }
 
     static void copy(InputStream source, OutputStream destination) throws IOException {
-        byte[] buffer = new byte[65536];
+        copy(source, destination, 1024 * 1024);
+    }
+
+    static void copy(InputStream source, OutputStream destination, int bufferSize) throws IOException {
+        byte[] buffer = new byte[bufferSize];
         int n;
         while ((n = source.read(buffer)) != -1) {
             if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Transfer cancelled");

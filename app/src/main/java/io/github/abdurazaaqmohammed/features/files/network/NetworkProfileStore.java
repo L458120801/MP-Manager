@@ -55,6 +55,15 @@ public final class NetworkProfileStore {
         String json = new String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), StandardCharsets.UTF_8);
         List<NetworkProfile> profiles = new Gson().fromJson(json, new TypeToken<List<NetworkProfile>>() {}.getType());
         if (profiles == null) throw new java.io.IOException("Invalid saved network profiles");
+        boolean migrated = false;
+        for (NetworkProfile profile : profiles) if (profile.protocol.equals("smb")) {
+            String address = profile.canonicalAddress();
+            if (!profile.address.equals(address)) {
+                profile.address = address;
+                migrated = true;
+            }
+        }
+        if (migrated) save(profiles);
         return profiles;
     }
 
@@ -68,6 +77,7 @@ public final class NetworkProfileStore {
 
     public void put(NetworkProfile profile) throws Exception {
         synchronized (LOCK) {
+            if (profile.protocol.equals("smb")) profile.address = profile.canonicalAddress();
             List<NetworkProfile> profiles = loadLocked();
             profiles.removeIf(p -> p.protocol.equals(profile.protocol)
                     && (p.name.equals(profile.name) || p.name.equals(profile.previousName)));

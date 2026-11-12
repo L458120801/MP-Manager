@@ -1943,6 +1943,7 @@ androidx/
     <string name="progress_to">ถิง</string>
     <string name="progress_stat_bytes">%1$d%% • %2$s / %3$s</string>
     <string name="progress_stat_items">%1$d / %2$d (%3$d%%)</string>
+    <string name="progress_stat_file_count">ไฟล์ %1$d/%2$d</string>
     <string name="progress_stat_elapsed">ใชเวลา %1$s</string>
     <string name="progress_left_bytes">เหลือ %1$s</string>
     <string name="progress_left_items">เหลือ %1$d</string>

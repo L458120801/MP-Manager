@@ -342,8 +342,14 @@ public class NetworkRegressionTest {
         android.os.Bundle arguments = InstrumentationRegistry.getArguments();
         String port = arguments.getString("networkSmbPort");
         org.junit.Assume.assumeTrue("Supply an adb-reversed disposable SMB fixture", port != null);
-        String folder = "android-network-test-" + UUID.randomUUID();
-        try (SmbClient client = new SmbClient("127.0.0.1", Integer.parseInt(port), "test", "tester", "test-only", "")) {
+        try (SmbClient client = new SmbClient("127.0.0.1", Integer.parseInt(port), "tester", "test-only", "")) {
+            List<RemoteEntry> shares = client.list("");
+            assertTrue(shares.stream().anyMatch(entry -> entry.name().equalsIgnoreCase("hidden$")));
+            assertFalse(shares.stream().anyMatch(entry -> entry.name().equalsIgnoreCase("IPC$")));
+            assertFalse(shares.stream().anyMatch(entry -> entry.name().equalsIgnoreCase("printer")));
+            String share = shares.stream().filter(entry -> entry.name().equalsIgnoreCase("test"))
+                    .findFirst().orElseThrow(AssertionError::new).path;
+            String folder = RemotePath.child(share, "android-network-test-" + UUID.randomUUID());
             client.mkdir(folder);
             try {
                 byte[] bytes = {0, 1, 2, 3};
@@ -383,6 +389,28 @@ public class NetworkRegressionTest {
         assertFalse(new NetworkProfileStore(context).load().stream().anyMatch(p -> p.name.equals(profile.name)));
     }
 
+    @Test public void legacySmbProfilesMigrateToServerRootAndKeepTheirPin() throws Exception {
+        NetworkProfile profile = new NetworkProfile();
+        profile.protocol = "smb";
+        profile.name = "legacy-smb-" + UUID.randomUUID();
+        profile.address = "smb://192.0.2.44:1445/Documents";
+        profile.username = "legacy-user";
+        profile.password = "legacy-password";
+        NetworkProfileStore store = new NetworkProfileStore(context);
+        SidebarPins.add(context, profile.pinId());
+        try {
+            java.lang.reflect.Method save = NetworkProfileStore.class.getDeclaredMethod("save", List.class);
+            save.setAccessible(true);
+            save.invoke(store, Collections.singletonList(profile));
+            NetworkProfile migrated = store.load().stream().filter(p -> p.name.equals(profile.name))
+                    .findFirst().orElseThrow(AssertionError::new);
+            assertEquals("smb://192.0.2.44:1445/", migrated.address);
+            assertEquals(profile.username, migrated.username);
+            assertEquals(profile.password, migrated.password);
+            assertTrue(SidebarPins.isPinned(context, profile.pinId()));
+        } finally { store.remove(profile); }
+    }
+
     @Test public void webdavAndSmbConfigurationsCanBeSavedAndPinnedWithoutConnecting() throws Exception {
         launchMain();
         NetworkProfileStore store = new NetworkProfileStore(context);
@@ -392,13 +420,15 @@ public class NetworkRegressionTest {
                 NetworkProfile profile = new NetworkProfile();
                 profile.protocol = protocol;
                 profile.name = "offline-pin-" + protocol + "-" + UUID.randomUUID();
-                profile.address = protocol.equals("smb") ? "smb://192.0.2.1/Documents" : "https://example.invalid/dav/";
+                profile.address = protocol.equals("smb") ? "smb://192.0.2.1:1445/" : "https://example.invalid/dav/";
                 created.add(profile);
                 instrumentation.runOnMainSync(() -> {
                     main.getNetwork().showConnectionDialog(protocol);
                     View form = visibleForm();
                     field(form, R.string.network_connection_name).setText(profile.name);
-                    field(form, protocol.equals("smb") ? R.string.network_smb_address : R.string.network_webdav_address).setText(profile.address);
+                    field(form, protocol.equals("smb") ? R.string.network_smb_address : R.string.network_webdav_address)
+                            .setText(protocol.equals("smb") ? "192.0.2.1" : profile.address);
+                    if (protocol.equals("smb")) field(form, R.string.network_smb_port).setText("1445");
                     ((CheckBox) text(form, R.string.pin_to_sidebar)).setChecked(true);
                 });
                 instrumentation.waitForIdleSync(); // AlertDialog's onShow callback installs its button listeners asynchronously.
@@ -412,9 +442,30 @@ public class NetworkRegressionTest {
                 } while (android.os.SystemClock.uptimeMillis() < deadline);
                 assertTrue("Configuration must save without trying to reach the server", saved);
                 assertTrue(SidebarPins.isPinned(context, profile.pinId()));
+                if (protocol.equals("smb")) assertEquals(profile.address, store.load().stream()
+                        .filter(savedProfile -> savedProfile.name.equals(profile.name)).findFirst().orElseThrow(AssertionError::new).address);
                 instrumentation.waitForIdleSync();
-                instrumentation.runOnMainSync(() -> assertTrue(connectionDialog().isShowing()));
+                instrumentation.runOnMainSync(() -> {
+                    assertTrue(connectionDialog().isShowing());
+                    if (protocol.equals("smb"))
+                        assertEquals(View.VISIBLE, text(visibleForm(), R.string.network_delete_connection).getVisibility());
+                });
             }
+            NetworkProfile smb = created.stream().filter(profile -> profile.protocol.equals("smb")).findFirst().orElseThrow(AssertionError::new);
+            click(context.getString(R.string.network_delete_connection));
+            awaitText(context.getString(R.string.network_delete_connection_confirm, smb.name));
+            click(context.getString(android.R.string.cancel));
+            assertTrue(store.load().stream().anyMatch(profile -> profile.name.equals(smb.name)));
+            assertTrue(SidebarPins.isPinned(context, smb.pinId()));
+            click(context.getString(R.string.network_delete_connection));
+            click(context.getString(R.string.delete));
+            long deleteDeadline = android.os.SystemClock.uptimeMillis() + 5000;
+            do {
+                if (store.load().stream().noneMatch(profile -> profile.name.equals(smb.name))) break;
+                android.os.SystemClock.sleep(50);
+            } while (android.os.SystemClock.uptimeMillis() < deleteDeadline);
+            assertFalse(store.load().stream().anyMatch(profile -> profile.name.equals(smb.name)));
+            assertFalse(SidebarPins.isPinned(context, smb.pinId()));
         } finally {
             for (NetworkProfile profile : created) store.remove(profile);
             instrumentation.runOnMainSync(() -> connectionDialog().dismiss());

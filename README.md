@@ -146,7 +146,7 @@ Browse app data folders through the Storage Access Framework without root. Docum
 
 <details><summary>WebDAV and SMB network storage</summary>
 
-Open **Network connections** from the sidebar: one Material-tabbed dialog contains **FTP**, **WebDAV**, and **SMB**. The SMB tab automatically discovers local servers using advertisements, Windows WS-Discovery, and a bounded SMB2/3 scan. WebDAV accepts HTTP(S) collection URLs; SMB accepts `smb://server/share` with an optional custom port and domain/workgroup. SMB1 is not supported.
+Open **Network connections** from the sidebar: one Material-tabbed dialog contains **FTP**, **WebDAV**, and **SMB**. The SMB tab automatically discovers local servers using advertisements, Windows WS-Discovery, and a bounded SMB2/3 scan. WebDAV accepts HTTP(S) collection URLs; SMB connects to a server hostname or IP address, with port 445 by default, then lists its disk shares as folders. Credentials and domain/workgroup are optional. SMB1 is not supported.
 
 Create files/folders, rename, delete, and copy or move files and whole folders between a network location and the other pane. Saved connections are encrypted with Android Keystore. Existing destinations are not silently overwritten, and moves remove their source only after a successful transfer.
 

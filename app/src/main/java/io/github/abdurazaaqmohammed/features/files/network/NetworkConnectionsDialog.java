@@ -68,16 +68,16 @@ final class NetworkConnectionsDialog implements AutoCloseable {
         heading.setText(R.string.network_discover);
         heading.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_TitleSmall);
         heading.setPadding(0, dp(16), 0, dp(4));
-        smb.view.addView(heading, 1);
+        smb.view.addView(heading, 3);
         MaterialButton scan = textButton(R.string.network_scan_smb);
         scan.setOnClickListener(v -> startDiscovery(true));
-        smb.view.addView(scan, 2);
+        smb.view.addView(scan, 4);
         discoveryStatus = new TextView(activity);
         discoveryStatus.setText(R.string.network_discovery_help);
-        smb.view.addView(discoveryStatus, 3);
+        smb.view.addView(discoveryStatus, 5);
         results = new LinearLayout(activity);
         results.setOrientation(LinearLayout.VERTICAL);
-        smb.view.addView(results, 4);
+        smb.view.addView(results, 6);
         dialog = activity.dialogUtil.getDialogBuilder().setTitle(R.string.network_connections).setView(root)
                 .setNegativeButton(android.R.string.cancel, null).setNeutralButton(R.string.save, null)
                 .setPositiveButton(R.string.connect, null).create();
@@ -180,6 +180,21 @@ final class NetworkConnectionsDialog implements AutoCloseable {
             profile.protocol = protocol;
             profile.name = form.name.getText().toString().trim();
             profile.address = form.address.getText().toString().trim();
+            if (protocol.equals("smb")) {
+                int port;
+                try {
+                    port = Integer.parseInt(form.port.getText().toString().trim());
+                    if (port < 1 || port > 65535) throw new NumberFormatException();
+                } catch (NumberFormatException e) {
+                    form.port.setError(activity.getString(R.string.network_invalid_port));
+                    return;
+                }
+                try { profile.address = new java.net.URI("smb", null, profile.address, port, "/", null, null).toASCIIString(); }
+                catch (java.net.URISyntaxException e) {
+                    form.address.setError(activity.getString(R.string.network_invalid_host));
+                    return;
+                }
+            }
             profile.username = form.username.getText().toString();
             profile.password = form.password.getText().toString();
             profile.domain = form.domain == null ? "" : form.domain.getText().toString().trim();
@@ -277,11 +292,19 @@ final class NetworkConnectionsDialog implements AutoCloseable {
             savedBox.addView(saved, new LinearLayout.LayoutParams(-1, -2));
             savedBox.setEndIconMode(TextInputLayout.END_ICON_DROPDOWN_MENU);
             addBox(savedBox);
+            pin = new MaterialCheckBox(activity);
+            pin.setText(R.string.pin_to_sidebar);
+            if (p.equals("smb")) view.addView(pin);
+            delete = textButton(R.string.network_delete_connection);
+            delete.setOnClickListener(v -> deleteSaved());
+            if (p.equals("smb")) view.addView(delete);
             name = field(R.string.network_connection_name, InputType.TYPE_CLASS_TEXT);
             address = field(p.equals("ftp") ? R.string.ip_address_hint
                     : p.equals("smb") ? R.string.network_smb_address : R.string.network_webdav_address,
-                    InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-            port = p.equals("ftp") ? field(R.string.port, InputType.TYPE_CLASS_NUMBER) : null;
+                    p.equals("smb") ? InputType.TYPE_CLASS_TEXT
+                            : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+            port = p.equals("ftp") || p.equals("smb")
+                    ? field(p.equals("ftp") ? R.string.port : R.string.network_smb_port, InputType.TYPE_CLASS_NUMBER) : null;
             username = field(R.string.network_username, InputType.TYPE_CLASS_TEXT);
             password = field(R.string.network_password, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
             domain = p.equals("smb") ? field(R.string.network_domain, InputType.TYPE_CLASS_TEXT) : null;
@@ -297,16 +320,14 @@ final class NetworkConnectionsDialog implements AutoCloseable {
             remember = new MaterialCheckBox(activity);
             remember.setText(p.equals("ftp") ? R.string.network_remember_ftp : R.string.network_remember);
             view.addView(remember);
-            pin = new MaterialCheckBox(activity);
-            pin.setText(R.string.pin_to_sidebar);
-            view.addView(pin);
+            if (!p.equals("smb")) {
+                view.addView(pin);
+                view.addView(delete);
+            }
             pin.setOnCheckedChangeListener((button, checked) -> {
                 if (checked) remember.setChecked(true);
                 remember.setEnabled(!checked);
             });
-            delete = textButton(R.string.network_delete_connection);
-            view.addView(delete);
-            delete.setOnClickListener(v -> deleteSaved());
             saved.setOnItemClickListener((parent, v, index, id) -> {
                 if (index == 0) { reset(); dirty = true; }
                 else if (p.equals("ftp")) load(ftpProfiles.get(index - 1));
@@ -351,9 +372,9 @@ final class NetworkConnectionsDialog implements AutoCloseable {
             loading = true;
             savedName = null;
             name.setText("");
-            address.setText(protocol.equals("ftp") ? "" : protocol.equals("smb") ? "smb://" : "https://");
+            address.setText(protocol.equals("ftp") || protocol.equals("smb") ? "" : "https://");
             username.setText(""); password.setText("");
-            if (port != null) port.setText("21");
+            if (port != null) port.setText(protocol.equals("ftp") ? "21" : "445");
             if (domain != null) domain.setText("");
             if (security != null) security.setText(activity.getResources().getStringArray(R.array.ftp_security_options)[0], false);
             pin.setChecked(false); remember.setChecked(false);
@@ -365,7 +386,14 @@ final class NetworkConnectionsDialog implements AutoCloseable {
         void load(NetworkProfile profile, boolean savedProfile) {
             loading = true;
             savedName = savedProfile ? profile.name : null;
-            name.setText(profile.name); address.setText(profile.address);
+            name.setText(profile.name);
+            if (protocol.equals("smb")) {
+                java.net.URI uri = java.net.URI.create(profile.address);
+                String host = uri.getHost();
+                if (host.startsWith("[") && host.endsWith("]")) host = host.substring(1, host.length() - 1);
+                address.setText(host);
+                port.setText(String.valueOf(uri.getPort() == -1 ? 445 : uri.getPort()));
+            } else address.setText(profile.address);
             username.setText(profile.username); password.setText(profile.password);
             if (domain != null) domain.setText(profile.domain);
             pin.setChecked(savedProfile && SidebarPins.isPinned(activity, profile.pinId()));
