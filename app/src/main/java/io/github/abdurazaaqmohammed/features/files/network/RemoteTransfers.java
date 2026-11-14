@@ -135,6 +135,38 @@ public final class RemoteTransfers {
         upload(destination, parent, source, null);
     }
 
+    static void uploadPlanned(RemoteClient destination, String parent, File source,
+                              DownloadPlan plan, FileUtils.TransferListener listener) throws IOException {
+        if (listener != null) listener.checkpoint();
+        String path = RemotePath.child(parent, source.getName());
+        if (destination.stat(path) != null) throw new IOException("Destination already exists: " + source.getName());
+        if (plan.entry.directory) {
+            destination.mkdir(path);
+            for (DownloadPlan child : plan.children)
+                uploadPlanned(destination, path, new File(source, child.entry.name()), child, listener);
+            return;
+        }
+        if (listener != null) listener.onFile(source, new File("/network/" + path));
+        try (InputStream input = listener == null ? new FileInputStream(source) : new FilterInputStream(new FileInputStream(source)) {
+            @Override public int read() throws IOException {
+                listener.checkpoint();
+                int value = super.read();
+                if (value >= 0) listener.onBytes(1);
+                return value;
+            }
+
+            @Override public int read(byte[] buffer, int offset, int length) throws IOException {
+                listener.checkpoint();
+                int count = super.read(buffer, offset, length);
+                if (count > 0) listener.onBytes(count);
+                return count;
+            }
+        }) {
+            destination.upload(path, input, source.length());
+        }
+        if (listener != null) listener.onFileComplete();
+    }
+
     static void upload(RemoteClient destination, String parent, File source,
                        FileUtils.TransferListener listener) throws IOException {
         if (java.nio.file.Files.isSymbolicLink(source.toPath())) throw new IOException("Symbolic links cannot be uploaded");

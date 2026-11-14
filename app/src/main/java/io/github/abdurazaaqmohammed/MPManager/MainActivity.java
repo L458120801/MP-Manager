@@ -76,7 +76,6 @@ import io.github.abdurazaaqmohammed.features.files.PaneHighlightController;
 import io.github.abdurazaaqmohammed.features.files.PaneNavigationController;
 import io.github.abdurazaaqmohammed.features.files.RightMenuController;
 import io.github.abdurazaaqmohammed.features.files.SidebarController;
-import io.github.abdurazaaqmohammed.tools.LogcatService;
 import io.github.abdurazaaqmohammed.utils.KeyboardUtil;
 import io.github.abdurazaaqmohammed.utils.RecycleBin;
 import io.github.abdurazaaqmohammed.utils.StartupPrivileges;
@@ -231,6 +230,13 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     /** Generation per pane: a stale background listing never overwrites a newer pane. */
     private volatile long paneLoadGen1;
     private volatile long paneLoadGen2;
+    private File pane1RequestedFolder;
+    private File pane2RequestedFolder;
+    private String pane1RequestedZipPath;
+    private String pane2RequestedZipPath;
+    private long folderCountGeneration;
+    private boolean refreshPane1OnResume;
+    private boolean refreshPane2OnResume;
     private String pendingDirToLoad;
     private String pendingHighlightName;
 
@@ -321,60 +327,77 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         ImageViewerActivity.open(this, filePath);
     }
 
-    public void playMediaFile(String filePath) {
+    public boolean playMediaFile(String filePath) {
         String lower = filePath == null ? "" : filePath.toLowerCase(Locale.ROOT);
         boolean isVideo = lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".avi")
                 || lower.endsWith(".mov") || lower.endsWith(".webm") || lower.endsWith(".3gp")
                 || lower.endsWith(".ts") || lower.endsWith(".flv") || lower.endsWith(".wmv")
                 || lower.endsWith(".m4v");
         boolean useActivity = isVideo || PreferenceManager.getDefaultSharedPreferences(this).getBoolean("player_open_activity", false);
-        if (useActivity) MediaPlayerActivity.openAndPlay(this, filePath);
-        else {
-            PlayerManager pm = PlayerManager.getInstance(this);
-            try {
-                File cur = new File(filePath);
-                File dir = cur.getParentFile();
-                if (dir != null && dir.isDirectory()) {
-                    File[] all = dir.listFiles();
-                    if (all != null) {
-                        List<File> media = new ArrayList<>();
-                        for (File f : all) {
-                            if (f == null || !f.isFile()) continue;
-                            String n = f.getName().toLowerCase(Locale.ROOT);
-                            if (n.endsWith(".mp3") || n.endsWith(".wav") || n.endsWith(".flac") || n.endsWith(".ogg")
-                                    || n.endsWith(".m4a") || n.endsWith(".aac") || n.endsWith(".wma") || n.endsWith(".opus")
-                                    || n.endsWith(".mp4") || n.endsWith(".mkv") || n.endsWith(".avi") || n.endsWith(".mov")
-                                    || n.endsWith(".webm") || n.endsWith(".3gp") || n.endsWith(".ts") || n.endsWith(".flv")
-                                    || n.endsWith(".wmv") || n.endsWith(".m4v")) media.add(f);
-                        }
-                        ListPrefs lp = new ListPrefs(this);
-                        String dirPath = dir.getAbsolutePath();
-                        File[] arr = media.toArray(new File[0]);
-                        FileSorting.sortFiles(arr, lp.sortBy(dirPath), lp.sortReverse(dirPath));
-                        if (arr.length > 0) {
-                            List<MediaItem> q = new ArrayList<>();
-                            int start = 0;
-                            String curAbs = cur.getAbsolutePath();
-                            String curName = cur.getName();
-                            for (int i = 0; i < arr.length; i++) {
-                                String path = arr[i].getAbsolutePath();
-                                if (path.equals(curAbs) || arr[i].getName().equalsIgnoreCase(curName)) {
-                                    start = i;
-                                    q.add(PlayerManager.buildMediaItem(this, path));
-                                } else {
-                                    q.add(PlayerManager.buildMediaItemFast(path));
-                                }
+        if (useActivity) {
+            MediaPlayerActivity.openAndPlay(this, filePath);
+            return true;
+        }
+        PlayerManager pm = PlayerManager.getInstance(this);
+        try {
+            File cur = new File(filePath);
+            File dir = cur.getParentFile();
+            if (dir != null && dir.isDirectory()) {
+                File[] all = dir.listFiles();
+                if (all != null) {
+                    List<File> media = new ArrayList<>();
+                    for (File f : all) {
+                        if (f == null || !f.isFile()) continue;
+                        String n = f.getName().toLowerCase(Locale.ROOT);
+                        if (n.endsWith(".mp3") || n.endsWith(".wav") || n.endsWith(".flac") || n.endsWith(".ogg")
+                                || n.endsWith(".m4a") || n.endsWith(".aac") || n.endsWith(".wma") || n.endsWith(".opus")
+                                || n.endsWith(".mp4") || n.endsWith(".mkv") || n.endsWith(".avi") || n.endsWith(".mov")
+                                || n.endsWith(".webm") || n.endsWith(".3gp") || n.endsWith(".ts") || n.endsWith(".flv")
+                                || n.endsWith(".wmv") || n.endsWith(".m4v")) media.add(f);
+                    }
+                    ListPrefs lp = new ListPrefs(this);
+                    String dirPath = dir.getAbsolutePath();
+                    File[] arr = media.toArray(new File[0]);
+                    FileSorting.sortFiles(arr, lp.sortBy(dirPath), lp.sortReverse(dirPath));
+                    if (arr.length > 0) {
+                        List<MediaItem> q = new ArrayList<>();
+                        int start = 0;
+                        String curAbs = cur.getAbsolutePath();
+                        String curName = cur.getName();
+                        for (int i = 0; i < arr.length; i++) {
+                            String path = arr[i].getAbsolutePath();
+                            if (path.equals(curAbs) || arr[i].getName().equalsIgnoreCase(curName)) {
+                                start = i;
+                                q.add(PlayerManager.buildMediaItem(this, path));
+                            } else {
+                                q.add(PlayerManager.buildMediaItemFast(path));
                             }
-                            pm.play(q, start);
-                            if (miniPlayerDialog == null || !miniPlayerDialog.isShowing()) (miniPlayerDialog = new MiniPlayerDialog(this)).show();
-                            return;
                         }
+                        pm.play(q, start);
+                        if (miniPlayerDialog == null || !miniPlayerDialog.isShowing()) (miniPlayerDialog = new MiniPlayerDialog(this)).show();
+                        return false;
                     }
                 }
-            } catch (Exception ignored) {}
-            pm.play(PlayerManager.buildMediaItem(this, filePath));
-            if (miniPlayerDialog == null || !miniPlayerDialog.isShowing()) (miniPlayerDialog = new MiniPlayerDialog(this)).show();
+            }
+        } catch (Exception ignored) {}
+        pm.play(PlayerManager.buildMediaItem(this, filePath));
+        if (miniPlayerDialog == null || !miniPlayerDialog.isShowing()) (miniPlayerDialog = new MiniPlayerDialog(this)).show();
+        return false;
+    }
+
+    public void markPaneForRefreshOnResume(boolean pane1) {
+        if (pane1) refreshPane1OnResume = true;
+        else refreshPane2OnResume = true;
+    }
+
+    private void setRequestedPaneLocation(File folder, String zipPath, boolean pane1) {
+        if (pane1) {
+            pane1RequestedFolder = folder;
+            pane1RequestedZipPath = zipPath;
+            return;
         }
+        pane2RequestedFolder = folder;
+        pane2RequestedZipPath = zipPath;
     }
 
     @Override
@@ -978,12 +1001,6 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(this);
         ShizukuFileOps.init(this);
         DirSizeCache.init(this);
-        // Logcat capture is opt-in at app start; opening the Logcat screen
-        // always starts it regardless of this preference.
-        if (PreferenceManager.getDefaultSharedPreferences(this)
-                .getBoolean(LogcatService.PREF_AUTO_START, false)) {
-            LogcatService.start(this);
-        }
         if (UiPrefs.folderSizeMode(this) != UiPrefs.FOLDER_SIZE_NONE) {
             DirSizeCache.preload();
         }
@@ -1722,8 +1739,10 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                             }
                         }
                     }
-                } else if (a instanceof RemoteFilesArrayAdapter remote) remote.goUp();
-                else ftp.ftpParent(lastPaneSelected == 1);
+                } else if (a instanceof RemoteFilesArrayAdapter remote) {
+                    if (remote.isMultiSelectMode()) remote.clearSelection();
+                    else remote.goUp();
+                } else ftp.ftpParent(lastPaneSelected == 1);
             }
         }
     }
@@ -1795,6 +1814,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     }
 
     public void loadFolderInPane(File folder, boolean pane1, boolean addToHistory) {
+        setRequestedPaneLocation(folder, null, pane1);
         invalidatePaneLoad(pane1);
         if (folder instanceof RemoteFile remote) {
             loadRemoteFolder(remote, pane1, addToHistory);
@@ -1821,7 +1841,8 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             clearGreen(pane1);
             if (!pane1) clearDiffColors();
         }
-        File[] files = listPlainFolder(folder, pane1);
+        final long gen = pane1 ? paneLoadGen1 : paneLoadGen2;
+        File[] files = listPlainFolder(folder, pane1, gen);
         if (files == null) return;
         Arrays.sort(files);
         sortFiles(files, folder.getPath());
@@ -1843,11 +1864,14 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             Extensions.showMessage(this, rss.getString(R.string.docs_error));
             return;
         }
+        invalidatePaneLoad(true);
+        final long gen = paneLoadGen1;
         listingExecutor.execute(() -> {
+            if (gen != paneLoadGen1) return;
             final SafFile root = SafFs.treeRoot(uri);
             handler.post(() -> {
                 try {
-                    if (isFinishing() || isDestroyed()) return;
+                    if (isFinishing() || isDestroyed() || gen != paneLoadGen1) return;
                     if (root == null) {
                         Extensions.showMessage(this, rss.getString(R.string.docs_error));
                         return;
@@ -1873,6 +1897,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         saveCurrentPaneScroll(pane1);
         final int[] saved = getSavedScrollForLocation(pane1, "saf:" + dir.getAbsolutePath());
         listingExecutor.execute(() -> {
+            if (gen != (pane1 ? paneLoadGen1 : paneLoadGen2)) return;
             final List<SafFile> children = SafFs.children(dir);
             handler.post(() -> {
                 try {
@@ -1926,6 +1951,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         saveCurrentPaneScroll(pane1);
         final int[] saved = getSavedScrollForLocation(pane1, "file:" + folder.getAbsolutePath());
         listingExecutor.execute(() -> {
+            if (gen != (pane1 ? paneLoadGen1 : paneLoadGen2)) return;
             try {
                 List<RemoteEntry> entries = folder.connection.client.list(folder.entry.path);
                 RemoteFile[] files = entries.stream().map(e -> new RemoteFile(folder.connection, e))
@@ -1955,7 +1981,8 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         });
     }
 
-    public long beginNetworkPaneLoad(boolean pane1) {
+    public long beginNetworkPaneLoad(boolean pane1, File folder) {
+        setRequestedPaneLocation(folder, null, pane1);
         saveCurrentPaneScroll(pane1);
         invalidatePaneLoad(pane1);
         return pane1 ? paneLoadGen1 : paneLoadGen2;
@@ -1966,6 +1993,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     }
 
     public void bindFtpFolder(FTPFileWrapper folder, FTPFileWrapper[] files, boolean pane1, boolean addToHistory) {
+        setRequestedPaneLocation(folder, null, pane1);
         if (pane1) { pane1Folder = folder; currentPane1Files = files; }
         else { pane2Folder = folder; currentPane2Files = files; }
         if (addToHistory) pushNavigationHistory(pane1, new NavigationHistoryEntry(folder, false, null));
@@ -2001,7 +2029,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
      * @return the unsorted listing, or null when the folder cannot be listed
      *         (the user has already been notified in that case).
      */
-    private File[] listPlainFolder(File folder, boolean pane1) {
+    private File[] listPlainFolder(File folder, boolean pane1, long gen) {
         boolean shizukuDir = ShizukuFile.isAndroidDataPath(folder);
         File[] files = null;
         String folderPath = folder.getAbsolutePath();
@@ -2063,6 +2091,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                 boolean rootAvailable = false;
                 try { rootAvailable = RootManager.getInstance(this).isRootAvailable(); } catch (Exception ignored) {}
                 if (!rootAvailable) runOnUiThread(() -> {
+                    if (gen != (pane1 ? paneLoadGen1 : paneLoadGen2)) return;
                     try {
                         showShizukuGuideOnce(folder, pane1);
                     } catch (Exception ignored) {
@@ -2080,12 +2109,19 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                         fallback = Environment.getExternalStorageDirectory();
                     }
                     if (fallback != null && (fallback.exists() || AccessManager.exists(this, fallback.getAbsolutePath())) && !fallback.equals(folder)) {
+                        if (gen != (pane1 ? paneLoadGen1 : paneLoadGen2)) return null;
                         final File validFallback = fallback;
-                        runOnUiThread(() -> loadFolderInPaneAsync(validFallback, pane1, false));
+                        runOnUiThread(() -> {
+                            if (gen == (pane1 ? paneLoadGen1 : paneLoadGen2)) {
+                                loadFolderInPaneAsync(validFallback, pane1, false);
+                            }
+                        });
                         return null;
                     }
                 }
+                if (gen != (pane1 ? paneLoadGen1 : paneLoadGen2)) return null;
                 runOnUiThread(() -> {
+                    if (gen != (pane1 ? paneLoadGen1 : paneLoadGen2)) return;
                     try {
                         Extensions.showMessage(this, getString(R.string.open_folder_failed, folder.getName()));
                     } catch (Exception ignored) {
@@ -2251,6 +2287,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
      *                  adapter is bound (e.g. scroll restore). Null to skip.
      */
     public void loadZipFolderInPane(File zipFile, String path, boolean pane1, boolean addToHistory, Runnable afterBind) {
+        setRequestedPaneLocation(zipFile, path == null ? "" : path, pane1);
         invalidatePaneLoad(pane1);
         final long gen = pane1 ? paneLoadGen1 : paneLoadGen2;
         saveCurrentPaneScroll(pane1);
@@ -2270,6 +2307,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             handler.postDelayed(showProgressRunnable, 120);
         }
         listingExecutor.execute(() -> {
+            if (gen != (pane1 ? paneLoadGen1 : paneLoadGen2)) return;
             if (zipFile == null || !zipFile.exists()) {
                 handler.post(() -> {
                     loadFinished[0] = true;
@@ -2280,11 +2318,16 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                 while (fallback != null && !fallback.exists()) fallback = fallback.getParentFile();
                 if (fallback == null || !fallback.exists()) fallback = Environment.getExternalStorageDirectory();
                 final File validFallback = fallback;
-                handler.post(() -> loadFolderInPaneAsync(validFallback, pane1, false));
+                handler.post(() -> {
+                    if (gen == (pane1 ? paneLoadGen1 : paneLoadGen2)) {
+                        loadFolderInPaneAsync(validFallback, pane1, false);
+                    }
+                });
                 return;
             }
             if (ArchiveBrowseUtil.detectArchiveType(zipFile) == ArchiveBrowseUtil.ArchiveType.NONE) {
                 handler.post(() -> {
+                    if (gen != (pane1 ? paneLoadGen1 : paneLoadGen2)) return;
                     loadFinished[0] = true;
                     handler.removeCallbacks(showProgressRunnable);
                     if (zipPm[0] != null) zipPm[0].dismiss();
@@ -2292,6 +2335,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                 });
                 return;
             }
+            if (gen != (pane1 ? paneLoadGen1 : paneLoadGen2)) return;
             final ZipRead read;
             try {
                 read = readZipFolder(zipFile, path);
@@ -2316,7 +2360,11 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                     while (fallback != null && !fallback.exists()) fallback = fallback.getParentFile();
                     if (fallback == null || !fallback.exists()) fallback = Environment.getExternalStorageDirectory();
                     final File validFallback = fallback;
-                    handler.post(() -> loadFolderInPaneAsync(validFallback, pane1, false));
+                    handler.post(() -> {
+                        if (gen == (pane1 ? paneLoadGen1 : paneLoadGen2)) {
+                            loadFolderInPaneAsync(validFallback, pane1, false);
+                        }
+                    });
                     return;
                 }
                 handler.post(() -> {
@@ -2503,6 +2551,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
      *                  adapter is bound (e.g. scroll restore). Null to skip.
      */
     public void loadFolderInPaneAsync(File folder, boolean pane1, boolean addToHistory, Runnable afterBind) {
+        setRequestedPaneLocation(folder, null, pane1);
         if (folder instanceof RemoteFile || folder instanceof FTPFileWrapper || SafFs.isSaf(folder)
                 || (!folder.isDirectory() && ArchiveUtil.isSupportedArchive(folder.getName()))) {
             loadFolderInPane(folder, pane1, addToHistory);
@@ -2525,13 +2574,15 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             if (!pane1) clearDiffColors();
         }
         listingExecutor.execute(() -> {
+            if (gen != (pane1 ? paneLoadGen1 : paneLoadGen2)) return;
             final File[] files;
             try {
-                files = listPlainFolder(folder, pane1);
+                files = listPlainFolder(folder, pane1, gen);
             } catch (Exception ignored) {
                 return;
             }
             if (files == null) return;
+            if (gen != (pane1 ? paneLoadGen1 : paneLoadGen2)) return;
             try {
                 Arrays.sort(files);
                 sortFiles(files, folderPath);
@@ -3203,17 +3254,16 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             handler.post(this::refreshAllPanes);
             return;
         }
-        // Programmatic refresh (onResume / returning from editors): keep scroll
-        // position, but never block the main thread on storage I/O.
+        // Programmatic refresh: keep scroll position, but never block the main
+        // thread on storage I/O.
         try { reloadPaneAsync(true, true); } catch (Exception ignored) { }
         try { reloadPaneAsync(false, true); } catch (Exception ignored) { }
     }
 
     /**
-     * onResume/programmatic refresh without main-thread I/O: plain folders
-     * re-list on {@link #listingExecutor} with scroll preserved; archives and
-     * FTP keep the synchronous path. Pull-to-refresh keeps sync
-     * {@link #reloadPane} for immediate spinner semantics.
+     * Programmatic refresh without main-thread I/O, using the latest requested
+     * pane location so an in-flight navigation is not replaced by the last
+     * committed folder.
      */
     private void reloadPaneAsync(boolean pane1, boolean preserveScroll) {
         final int[] saved = preserveScroll ? capturePaneScroll(pane1) : null;
@@ -3221,32 +3271,30 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             RecyclerView pane = findViewById(pane1 ? R.id.listViewPane1 : R.id.listViewPane2);
             if (pane == null) return;
             RecyclerView.Adapter<?> adapter = pane.getAdapter();
-            if (adapter instanceof MainFilesArrayAdapter filesAdapter) {
-                if (filesAdapter.isInZip) {
-                    File zipFile = pane1 ? pane1Folder : pane2Folder;
-                    if (zipFile == null) return;
-                    String zipPath = filesAdapter.currentZipPath == null ? "" : filesAdapter.currentZipPath;
-                    loadZipFolderInPane(zipFile, zipPath, pane1, false,
-                            saved != null ? () -> restorePaneScroll(pane1, saved) : null);
-                    return;
-                }
-                File folder = pane1 ? pane1Folder : pane2Folder;
-                if (folder == null) return;
-                loadFolderInPaneAsync(folder, pane1, false,
-                        saved != null ? () -> restorePaneScroll(pane1, saved) : null);
-            } else if (adapter instanceof RemoteFilesArrayAdapter remote) {
-                loadFolderInPane(remote.folder, pane1, false);
-            } else if (adapter instanceof FtpFilesArrayAdapter) {
-                reloadPane(pane1, preserveScroll);
+            File requestedFolder = pane1 ? pane1RequestedFolder : pane2RequestedFolder;
+            File folder = requestedFolder != null ? requestedFolder : (pane1 ? pane1Folder : pane2Folder);
+            if (folder == null) return;
+            String zipPath = requestedFolder != null
+                    ? (pane1 ? pane1RequestedZipPath : pane2RequestedZipPath) : null;
+            if (zipPath == null && requestedFolder == null
+                    && adapter instanceof MainFilesArrayAdapter filesAdapter && filesAdapter.isInZip) {
+                zipPath = filesAdapter.currentZipPath == null ? "" : filesAdapter.currentZipPath;
             }
-            // No adapter yet (cold start): nothing to refresh.
+            if (zipPath != null) {
+                loadZipFolderInPane(folder, zipPath, pane1, false,
+                        saved != null ? () -> restorePaneScroll(pane1, saved) : null);
+                return;
+            }
+            loadFolderInPaneAsync(folder, pane1, false,
+                    saved != null ? () -> restorePaneScroll(pane1, saved) : null);
         } catch (Exception ignored) {
         }
     }
 
     public void setCurrentFolder(File curr, File[] files) {
+        final long countGen = ++folderCountGeneration;
         if (files == null) {
-            updateFolderCount(0, 0, curr);
+            updateFolderCount(0, 0, curr, countGen);
             return;
         }
         // Count from the already-listed array (root listings carry
@@ -3269,7 +3317,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         // on the main thread blocked the first frame of big listings such as
         // /vendor, so count in the background and post just the two numbers.
         final File folder = curr;
-        listingExecutor.execute(() -> {
+        new Thread(() -> {
             int foldersCount = 0;
             for (int i = 0; i < files.length; i++) {
                 File f = files[i];
@@ -3281,11 +3329,11 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                 }
             }
             int listed = files.length - (skipFirst ? 1 : 0);
-            updateFolderCount(foldersCount, listed - foldersCount, folder);
-        });
+            updateFolderCount(foldersCount, listed - foldersCount, folder, countGen);
+        }, "folder-count").start();
     }
 
-    private void updateFolderCount(int foldersCount, int totalCount, File curr) {
+    private void updateFolderCount(int foldersCount, int totalCount, File curr, long countGen) {
         TextView currentFolderPath = findViewById(R.id.currentFolderPath);
         final int finalFoldersCount = foldersCount;
         final int finalTotalCount = totalCount;
@@ -3294,6 +3342,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                 : (curr instanceof FTPFileWrapper ftpFolder ? ftpFolder.displayPath()
                 : (curr instanceof SafFile ? ((SafFile) curr).getDisplayPath() : curr.getPath())));
         handler.post(() -> {
+            if (countGen != folderCountGeneration) return;
             currentFolderPath.setText(path);
             uiHelper.scrollTextView(currentFolderPath);
             this.<TextView>findViewById(R.id.folderCount)
@@ -3339,6 +3388,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     }
 
     public void setCurrentFolder(String path, List<?> files) {
+        final long countGen = ++folderCountGeneration;
         new Thread(() -> {
 
             //CollectionsUtils.removeIf(files, (Predicate<Object>) o -> o instanceof ZipEntryInfo && ((ZipEntryInfo) o).isDirectory());
@@ -3354,6 +3404,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             }
             int finalFoldersCount = foldersCount;
             handler.post(() -> {
+                if (countGen != folderCountGeneration) return;
                 TextView currentFolderPath = findViewById(R.id.currentFolderPath);
                 currentFolderPath.setText(path);
                 uiHelper.scrollTextView(currentFolderPath);
@@ -3365,6 +3416,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     }
 
     public void setCurrentFolderFromSelected(File curr, Set<File> files) {
+        folderCountGeneration++;
         TextView currentFolderPath = findViewById(R.id.currentFolderPath);
         currentFolderPath.setText(curr.getPath());
         uiHelper.scrollTextView(currentFolderPath);
@@ -3450,13 +3502,12 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             refreshSidebarAsync(getSidebarSectionOrder());
         } catch (Exception ignored) {
         }
-        // Returning from editors/viewers (started with startActivity, not for result)
-        // leaves listings stale — re-list the visible panes off the main thread,
-        // preserving scroll position.
-        try {
-            refreshAllPanes();
-        } catch (Exception ignored) {
-        }
+        boolean refreshPane1 = refreshPane1OnResume;
+        boolean refreshPane2 = refreshPane2OnResume;
+        refreshPane1OnResume = false;
+        refreshPane2OnResume = false;
+        if (refreshPane1) reloadPaneAsync(true, true);
+        if (refreshPane2) reloadPaneAsync(false, true);
         try {
             if (pendingDirToLoad != null) {
                 String toLoad = pendingDirToLoad;
@@ -3471,11 +3522,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             }
         } catch (Exception ignored) {
         }
-        // A provider location picked in the Documents providers screen. Handled
-        // AFTER refreshAllPanes: that refresh re-lists the stale pane folders,
-        // and because every load is generation-guarded, the last one submitted
-        // wins - opening the tree first meant the plain reload silently
-        // cancelled it.
+        // A provider location picked in the Documents providers screen.
         try {
             String safTree = getIntent() == null ? null : getIntent().getStringExtra("safTree");
             if (safTree != null && !safTree.isEmpty()) {
@@ -3499,6 +3546,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         // Drop any in-flight background listing so it never touches dead views.
         invalidatePaneLoad(true);
         invalidatePaneLoad(false);
+        folderCountGeneration++;
         network.close();
         ftp.close();
         try {

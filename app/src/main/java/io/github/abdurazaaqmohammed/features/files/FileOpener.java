@@ -168,6 +168,25 @@ public class FileOpener {
         this.fileOps = fileOps;
     }
 
+    private void startFileActivity(Intent intent) {
+        context.markPaneForRefreshOnResume(pane1);
+        context.startActivity(intent);
+    }
+
+    private void startFileActivityForResult(Intent intent, int requestCode) {
+        context.markPaneForRefreshOnResume(pane1);
+        context.startActivityForResult(intent, requestCode);
+    }
+
+    private void openImageViewer(String path) {
+        context.markPaneForRefreshOnResume(pane1);
+        context.openImageViewer(path);
+    }
+
+    private void playMediaFile(String path) {
+        if (context.playMediaFile(path)) context.markPaneForRefreshOnResume(pane1);
+    }
+
     public interface ReadableCallback {
         void onReady(File readable) throws Exception;
     }
@@ -178,7 +197,7 @@ public class FileOpener {
                 if (StickerUtil.isLottieSticker(readable)) {
                     StickerPreviewDialog.show(context, readable);
                 } else {
-                    context.openImageViewer(readable.getPath());
+                    openImageViewer(readable.getPath());
                 }
             });
             return;
@@ -202,7 +221,7 @@ public class FileOpener {
                 if (StickerUtil.isLottieSticker(readable)) {
                     StickerPreviewDialog.show(context, readable);
                 } else {
-                    context.openImageViewer(readable.getPath());
+                    openImageViewer(readable.getPath());
                 }
             });
             return;
@@ -484,7 +503,7 @@ public class FileOpener {
                 return;
             case BUILTIN_IMAGE:
                 if (file == null) return;
-                withReadableCopy(file, readable -> context.openImageViewer(readable.getAbsolutePath()));
+                withReadableCopy(file, readable -> openImageViewer(readable.getAbsolutePath()));
                 return;
             case BUILTIN_HEX:
                 if (file == null || !file.isFile()) {
@@ -495,7 +514,7 @@ public class FileOpener {
                 return;
             case BUILTIN_MEDIA:
                 if (file == null) return;
-                withReadableCopy(file, readable -> context.playMediaFile(readable.getAbsolutePath()));
+                withReadableCopy(file, readable -> playMediaFile(readable.getAbsolutePath()));
                 return;
             case BUILTIN_APK: {
                 if (fileName == null) return;
@@ -570,7 +589,7 @@ public class FileOpener {
             Intent intent = new Intent(context, io.github.abdurazaaqmohammed.features.sqlite.SqliteViewerActivity.class)
                     .putExtra(io.github.abdurazaaqmohammed.features.sqlite.SqliteViewerActivity.EXTRA_DB_PATH, readable.getAbsolutePath())
                     .putExtra(io.github.abdurazaaqmohammed.features.sqlite.SqliteViewerActivity.EXTRA_ORIGINAL_PATH, file.getAbsolutePath());
-            context.startActivity(intent);
+            startFileActivity(intent);
         });
     }
 
@@ -607,7 +626,7 @@ public class FileOpener {
                 .setDataAndType(uri, mime)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         intent.setClassName(info.activityInfo.packageName, info.activityInfo.name);
-        context.startActivity(intent);
+        startFileActivity(intent);
     }
 
     private boolean tryLaunchDefaultApp(Uri uri, String mime) {
@@ -625,7 +644,7 @@ public class FileOpener {
             List<ResolveInfo> stillThere = pm.queryIntentActivities(probe, 0);
             if (!stillThere.isEmpty()) {
                 probe.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                context.startActivity(probe);
+                startFileActivity(probe);
                 return true;
             }
         } catch (Exception ignored) {
@@ -1036,7 +1055,7 @@ public class FileOpener {
     }
 
     private void showHtmlViewer(File readable, String fileName) {
-        context.startActivity(new Intent(context, HtmlViewerActivity.class)
+        startFileActivity(new Intent(context, HtmlViewerActivity.class)
                 .putExtra(HtmlViewerActivity.EXTRA_PATH, readable.getAbsolutePath())
                 .putExtra(HtmlViewerActivity.EXTRA_NAME, fileName));
     }
@@ -1550,13 +1569,13 @@ public class FileOpener {
                     .setSingleChoiceItems(items, -1, (dialog, which) -> {
                         dialog.dismiss();
                         if (which == 0) {
-                            context.startActivity(rootAwareEditorIntent(readable, file)
+                            startFileActivity(rootAwareEditorIntent(readable, file)
                                     .putExtra("path", readable.getPath()));
                         } else if (isBinary) {
                             // Decoded by the editor from the staged copy (see the
                             // note in handleFileClick): pre-decoded text can blow
                             // the binder transaction limit on large binary XML.
-                            context.startActivity(rootAwareEditorIntent(readable, file)
+                            startFileActivity(rootAwareEditorIntent(readable, file)
                                     .putExtra("axml", true)
                                     .putExtra("path", readable.getPath()));
                         } else {
@@ -1631,7 +1650,7 @@ public class FileOpener {
                 .setTitle(context.getString(R.string.sh_select_action) + ": " + fileName)
                 .setView(root)
                 .setNegativeButton(android.R.string.cancel, null)
-                .setNeutralButton(R.string.sh_edit, (dialog, which) -> context.startActivity(
+                .setNeutralButton(R.string.sh_edit, (dialog, which) -> startFileActivity(
                         rootAwareEditorIntent(readable, original).putExtra("path", readable.getPath())))
                 .setPositiveButton(R.string.sh_execute, (dialog, which) -> executeShellScript(
                         readable, runAsRootBox != null && runAsRootBox.isChecked()))
@@ -1815,7 +1834,7 @@ public class FileOpener {
                     // the intent can exceed the binder transaction limit on big
                     // system XMLs (/data/system/packages.xml) and crash with
                     // "Failure from system" (TransactionTooLargeException).
-                    context.startActivity(rootAwareEditorIntent(readable, file)
+                    startFileActivity(rootAwareEditorIntent(readable, file)
                             .putExtra("path", readable.getPath()));
                 } catch (Exception e) {
                     new ErrorUtil(context).showError(e);
@@ -1826,11 +1845,11 @@ public class FileOpener {
                 if (StickerUtil.isLottieSticker(readable)) {
                     StickerPreviewDialog.show(context, readable);
                 } else {
-                    context.openImageViewer(readable.getPath());
+                    openImageViewer(readable.getPath());
                 }
             });
         } else if (FileUtils.matchExt(ext, FileUtils.AUDIO_EXTS) || FileUtils.matchExt(ext, FileUtils.VIDEO_EXTS)) {
-            withReadableCopy(file, readable -> context.playMediaFile(readable.getPath()));
+            withReadableCopy(file, readable -> playMediaFile(readable.getPath()));
         } else if ((ext.equals(".apk"))) {
             withReadableCopy(file, readable -> {
                 if (apkTools != null) apkTools.showApkInfoDialog(readable, fileName);
@@ -1869,7 +1888,7 @@ public class FileOpener {
                 withReadableCopy(file, readable -> {
                     Intent intent = new Intent(context, CompareDexActivity.class)
                             .putExtra(CompareDexActivity.EXTRA_MTCR_FILE, readable.getAbsolutePath());
-                    context.startActivity(intent);
+                    startFileActivity(intent);
                 });
             } else if (fileName.equals("libapp.so") || fileName.equals("libflutter.so")) {
                 withReadableCopy(file, readable -> io.github.abdurazaaqmohammed.features.apk.flutter.FlutterToolsDialog.showForLibrary(context, readable, fileName));
@@ -2617,7 +2636,7 @@ public class FileOpener {
 
     private void openTextEditorRootAware(File file) {
         withReadableCopy(file, readable ->
-                context.startActivity(rootAwareEditorIntent(readable, file)
+                startFileActivity(rootAwareEditorIntent(readable, file)
                         .putExtra("path", readable.getAbsolutePath())));
     }
 
@@ -2627,7 +2646,7 @@ public class FileOpener {
             return;
         }
         File orig = original != null ? original : readable;
-        context.startActivity(rootAwareEditorIntent(readable, orig)
+        startFileActivity(rootAwareEditorIntent(readable, orig)
                 .putExtra("path", readable.getAbsolutePath()));
     }
 
@@ -2650,7 +2669,7 @@ public class FileOpener {
             i.putExtra("rootOriginalPath", orig.getAbsolutePath());
             Extensions.showMessage(context, R.string.opened_with_root);
         }
-        context.startActivity(i);
+        startFileActivity(i);
     }
 
     /**
@@ -2661,7 +2680,7 @@ public class FileOpener {
      */
     private void openTextEditor(File file, File zipFile, String zipEntryPath) {
         if (zipFile != null && zipEntryPath != null && !zipEntryPath.isEmpty()) {
-            context.startActivityForResult(new Intent(context, TextEditorActivity.class)
+            startFileActivityForResult(new Intent(context, TextEditorActivity.class)
                     .putExtra("zf", zipFile.getPath())
                     .putExtra("zipEntryPath", zipEntryPath)
                     .putExtra("path", file.getAbsolutePath()), 757);
@@ -2689,7 +2708,7 @@ public class FileOpener {
                 i.putExtra("rootOriginalPath", file.getAbsolutePath());
                 Extensions.showMessage(context, R.string.opened_with_root);
             }
-            context.startActivity(i);
+            startFileActivity(i);
         });
     }
 
@@ -2854,8 +2873,8 @@ public class FileOpener {
                     // Inside an archive the editor only edits the extracted copy and
                     // returns it via setResult(757); MainActivity then shows the
                     // "APK/ZIP updated" prompt and injects the file itself.
-                    if (apkFile != null) context.startActivityForResult(arscIntent, 757);
-                    else context.startActivity(arscIntent);
+                    if (apkFile != null) startFileActivityForResult(arscIntent, 757);
+                    else startFileActivity(arscIntent);
                 }).create());
     }
 }

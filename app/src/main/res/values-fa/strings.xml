@@ -2014,9 +2014,10 @@ com/gms/
     <string name="logcat_filter_pid">پالایش بر اساس PID: %s</string>
     <string name="logcat_service_running">در حال ضبط گزارش‌ها در پس‌زمینه</string>
     <string name="logcat_stop">توقف</string>
+    <string name="logcat_capture_start">شروع ضبط</string>
+    <string name="logcat_capture_stop">توقف ضبط</string>
     <string name="logcat_settings">تنظیمات</string>
     <string name="logcat_keep_running">ادامه ضبط در پس‌زمینه (اعلان نشان داده می‌شود)</string>
-    <string name="logcat_auto_start">شروع ضبط هنگام باز شدن MP Manager</string>
     <string name="logcat_add_shortcut">افزودن به صفحه اصلی</string>
     <string name="logcat_shortcut_old_android">میان‌برها به اندروید 8.0 یا جدیدتر نیاز دارند</string>
     <string name="logcat_shortcut_unsupported">لانچر اجازه میان‌برها را نمی‌دهد</string>

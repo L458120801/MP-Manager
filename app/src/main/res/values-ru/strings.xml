@@ -1974,9 +1974,10 @@
     <string name="logcat_filter_pid">Фильтр по PID: %s</string>
     <string name="logcat_service_running">Захват журналов в фоне</string>
     <string name="logcat_stop">Остановить</string>
+    <string name="logcat_capture_start">Начать захват</string>
+    <string name="logcat_capture_stop">Остановить захват</string>
     <string name="logcat_settings">Настройки</string>
     <string name="logcat_keep_running">Продолжать захват в фоне (показано уведомление)</string>
-    <string name="logcat_auto_start">Начинать захват при открытии MP Manager</string>
     <string name="logcat_add_shortcut">Добавить на главный экран</string>
     <string name="logcat_shortcut_old_android">Для ярлыков нужен Android 8.0 или новее</string>
     <string name="logcat_shortcut_unsupported">Лаунчер не разрешает ярлыки</string>

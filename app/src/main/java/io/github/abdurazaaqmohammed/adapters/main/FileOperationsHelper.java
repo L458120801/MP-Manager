@@ -54,7 +54,6 @@ import io.github.abdurazaaqmohammed.features.dex.DexTools;
 import io.github.abdurazaaqmohammed.MPManager.shizuku.ShizukuFileOps;
 import io.github.abdurazaaqmohammed.adapters.FtpFilesArrayAdapter;
 import io.github.abdurazaaqmohammed.features.files.network.RemoteFile;
-import io.github.abdurazaaqmohammed.features.files.network.SmbClient;
 import io.github.abdurazaaqmohammed.MPManager.ftp.FTPFileWrapper;
 import io.github.abdurazaaqmohammed.domain.files.ZipEntryInfo;
 import io.github.abdurazaaqmohammed.utils.ArchiveUtil;
@@ -195,12 +194,16 @@ public class FileOperationsHelper {
      *                     0 leaves it off
      */
     private void runWithProgress(String text, List<?> items, int operationRes, IoOperation op) {
+        runWithProgress(text, items, operationRes, true, op);
+    }
+
+    private void runWithProgress(String text, List<?> items, int operationRes, boolean measureItems, IoOperation op) {
         showActiveProgress(text, operationRes);
         new Thread(() -> {
             try {
                 // Measuring happens here, not on the UI thread: an elevated tree
                 // needs a shell round trip to count.
-                applyMeasure(measureInfo(items).total);
+                if (measureItems) applyMeasure(measureInfo(items).total);
                 op.run();
             } catch (Exception e) {
                 if (!TransferCancelledException.isCancellation(e)) {
@@ -379,18 +382,22 @@ public class FileOperationsHelper {
     }
 
     public void copyItemsAsync(List<Object> items) {
-        runWithProgress(context.rss.getString(R.string.copying, summarizeItems(items)), items, R.string.op_copying, () -> copyMultiple(items));
+        File destination = adapter.pane1 ? context.pane2Folder : context.pane1Folder;
+        runWithProgress(context.rss.getString(R.string.copying, summarizeItems(items)), items, R.string.op_copying,
+                !(destination instanceof RemoteFile), () -> copyMultiple(items));
     }
 
     /** Copies the selection into an explicitly chosen folder (same-pane paste). */
     public void copyItemsToFolder(List<Object> items, File destinationFolder) {
         runWithProgress(context.rss.getString(R.string.copying, summarizeItems(items)), items, R.string.op_copying,
+                !(destinationFolder instanceof RemoteFile),
                 () -> copyToDestination(items, destinationFolder));
     }
 
     /** Moves the selection into an explicitly chosen folder (same-pane paste). */
     public void moveItemsToFolder(List<Object> items, File destinationFolder) {
         runWithProgress(context.rss.getString(R.string.moving_f, summarizeItems(items)), items, R.string.op_moving,
+                !(destinationFolder instanceof RemoteFile),
                 () -> moveToDestination(items, destinationFolder));
     }
 
@@ -402,7 +409,9 @@ public class FileOperationsHelper {
     public void moveAsync(Object item) {
         List<Object> items = (adapter.isMultiSelectMode() && !adapter.getSelectedFiles().isEmpty())
                 ? adapter.getSelectedFiles() : Collections.singletonList(item);
-        runWithProgress(context.rss.getString(R.string.moving_f, summarizeItems(items)), items, R.string.op_moving, () -> move(item));
+        File destination = adapter.pane1 ? context.pane2Folder : context.pane1Folder;
+        runWithProgress(context.rss.getString(R.string.moving_f, summarizeItems(items)), items, R.string.op_moving,
+                !(destination instanceof RemoteFile), () -> move(item));
     }
 
     public void copy(Object item) throws IOException {
@@ -481,8 +490,7 @@ public class FileOperationsHelper {
 
     private boolean moveToDestination(List<Object> items, File destinationFolder) throws IOException {
         if (destinationFolder instanceof RemoteFile remote) {
-            context.getNetwork().transferInto(items, remote, true,
-                    transferListener(remote.connection.client instanceof SmbClient));
+            context.getNetwork().transferInto(items, remote, true, transferProgress(true));
             return true;
         }
         if (transferFromSafPane(items, true)) return true;
@@ -866,8 +874,7 @@ public class FileOperationsHelper {
 
     private boolean copyToDestination(List<Object> items, File destinationFolder) throws IOException {
         if (destinationFolder instanceof RemoteFile remote) {
-            context.getNetwork().transferInto(items, remote, false,
-                    transferListener(remote.connection.client instanceof SmbClient));
+            context.getNetwork().transferInto(items, remote, false, transferProgress(true));
             return true;
         }
         if (transferFromSafPane(items, false)) return true;
@@ -1220,9 +1227,14 @@ public class FileOperationsHelper {
     }
 
     private FileUtils.TransferListener transferListener(boolean megabyteUnits) {
+        ProgressManager pm = transferProgress(megabyteUnits);
+        return pm == null ? null : pm.listener();
+    }
+
+    private ProgressManager transferProgress(boolean megabyteUnits) {
         ProgressManager pm = activeProgress;
         if (pm != null) pm.setMegabyteUnits(megabyteUnits).setShowFileCount(megabyteUnits);
-        return pm == null ? null : pm.listener();
+        return pm;
     }
 
     /**

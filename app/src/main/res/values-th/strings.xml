@@ -2004,9 +2004,10 @@ androidx/
 <string name="logcat_filter_pid">กรองตาม PID: %s</string>
 <string name="logcat_service_running">กำลังบันทึก log ในเบื้องหลัง</string>
 <string name="logcat_stop">หยุด</string>
+<string name="logcat_capture_start">เริ่มบันทึก</string>
+<string name="logcat_capture_stop">หยุดบันทึก</string>
 <string name="logcat_settings">การตั้งค่า</string>
 <string name="logcat_keep_running">บันทึก log ต่อในเบื้องหลัง (แสดงการแจ้งเตือน)</string>
-<string name="logcat_auto_start">เริ่มบันทึก log เมื่อเปิด MP Manager</string>
 <string name="logcat_add_shortcut">เพิ่มไปยังหน้าจอหลัก</string>
 <string name="logcat_shortcut_old_android">ทางลัดต้องใช้ Android 8.0 ขึ้นไป</string>
 <string name="logcat_shortcut_unsupported">Launcher ไม่อนุญาตให้สร้างทางลัด</string>

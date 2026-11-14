@@ -1992,9 +1992,10 @@ Layout Inspector
     <string name="logcat_filter_pid">Filtrar por PID: %s</string>
     <string name="logcat_service_running">Capturando registros en segundo plano</string>
     <string name="logcat_stop">Detener</string>
+    <string name="logcat_capture_start">Iniciar captura</string>
+    <string name="logcat_capture_stop">Detener captura</string>
     <string name="logcat_settings">Ajustes</string>
     <string name="logcat_keep_running">Seguir capturando en segundo plano (se muestra una notificación)</string>
-    <string name="logcat_auto_start">Iniciar la captura al abrir MP Manager</string>
     <string name="logcat_add_shortcut">Añadir a la pantalla de inicio</string>
     <string name="logcat_shortcut_old_android">Los accesos directos requieren Android 8.0 o posterior</string>
     <string name="logcat_shortcut_unsupported">El lanzador no permite accesos directos</string>

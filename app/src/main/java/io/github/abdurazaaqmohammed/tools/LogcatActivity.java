@@ -92,7 +92,9 @@ public class LogcatActivity extends BaseActivity implements LogcatReader.Listene
     private TextView emptyView;
     private TextView banner;
     private TextInputEditText searchBox;
+    private MaterialButton captureBtn;
     private MaterialButton pauseBtn;
+    private boolean captureActive;
     private boolean paused;
     private boolean autoScroll = true;
     private String query = "";
@@ -193,6 +195,8 @@ public class LogcatActivity extends BaseActivity implements LogcatReader.Listene
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.HORIZONTAL);
         controls.setPadding(dp(8), dp(4), dp(8), dp(8));
+        captureBtn = controlButton(getString(R.string.logcat_capture_start), v -> toggleCapture());
+        controls.addView(captureBtn, rowWeight());
         pauseBtn = controlButton(getString(R.string.logcat_pause), v -> togglePause());
         controls.addView(pauseBtn, rowWeight());
         controls.addView(controlButton(getString(R.string.logcat_clear), v -> clearLogs()), rowWeight());
@@ -205,13 +209,12 @@ public class LogcatActivity extends BaseActivity implements LogcatReader.Listene
     @Override
     protected void onStart() {
         super.onStart();
-        // The capture lives in the service: opening this screen is what
-        // starts it (never at app launch unless the user turns that on).
-        LogcatService.start(this);
         lastSeenId = -1;
         LogcatService.addListener(this);
         hydrateFromService();
-        banner.setText(LogcatService.isRunning() ? R.string.logcat_live : R.string.logcat_starting);
+        captureActive = LogcatService.isRunning();
+        updateCaptureButton();
+        banner.setText(captureActive ? R.string.logcat_live : R.string.stopped);
     }
 
     @Override
@@ -298,7 +301,9 @@ public class LogcatActivity extends BaseActivity implements LogcatReader.Listene
 
     @Override
     public void onEof(String error) {
-        banner.setText(R.string.logcat_stream_ended);
+        captureActive = false;
+        updateCaptureButton();
+        banner.setText(error == null ? R.string.stopped : R.string.logcat_stream_ended);
     }
 
     /**
@@ -331,6 +336,24 @@ public class LogcatActivity extends BaseActivity implements LogcatReader.Listene
         paused = !paused;
         pauseBtn.setText(paused ? R.string.logcat_resume : R.string.logcat_pause);
         if (!paused) applyFilters();
+    }
+
+    private void toggleCapture() {
+        if (captureActive) {
+            LogcatService.stop(this);
+            captureActive = false;
+            updateCaptureButton();
+            banner.setText(R.string.stopped);
+            return;
+        }
+        captureActive = true;
+        updateCaptureButton();
+        banner.setText(R.string.logcat_starting);
+        LogcatService.start(this);
+    }
+
+    private void updateCaptureButton() {
+        captureBtn.setText(captureActive ? R.string.logcat_capture_stop : R.string.logcat_capture_start);
     }
 
     private void clearLogs() {
@@ -444,16 +467,11 @@ public class LogcatActivity extends BaseActivity implements LogcatReader.Listene
         keepRunning.setText(R.string.logcat_keep_running);
         keepRunning.setChecked(prefs.getBoolean(LogcatService.PREF_KEEP_RUNNING, true));
         box.addView(keepRunning);
-        CheckBox autoStart = new CheckBox(this);
-        autoStart.setText(R.string.logcat_auto_start);
-        autoStart.setChecked(prefs.getBoolean(LogcatService.PREF_AUTO_START, false));
-        box.addView(autoStart);
         new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.logcat_settings)
                 .setView(box)
                 .setPositiveButton(android.R.string.ok, (d, w) -> prefs.edit()
                         .putBoolean(LogcatService.PREF_KEEP_RUNNING, keepRunning.isChecked())
-                        .putBoolean(LogcatService.PREF_AUTO_START, autoStart.isChecked())
                         .apply())
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();

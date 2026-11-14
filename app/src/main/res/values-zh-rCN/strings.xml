@@ -2028,9 +2028,10 @@ Layout Inspector
     <string name="logcat_filter_pid">按 PID 过滤：%s</string>
     <string name="logcat_service_running">正在后台捕获日志</string>
     <string name="logcat_stop">停止</string>
+    <string name="logcat_capture_start">开始采集</string>
+    <string name="logcat_capture_stop">停止采集</string>
     <string name="logcat_settings">设置</string>
     <string name="logcat_keep_running">在后台继续捕获（显示通知）</string>
-    <string name="logcat_auto_start">打开 MP Manager 时开始捕获</string>
     <string name="logcat_add_shortcut">添加到主屏幕</string>
     <string name="logcat_shortcut_old_android">快捷方式需要 Android 8.0 或更高版本</string>
     <string name="logcat_shortcut_unsupported">启动器不允许使用快捷方式</string>

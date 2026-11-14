@@ -2198,9 +2198,10 @@
     <string name="logcat_filter_pid">تصفية حسب PID: %s</string>
     <string name="logcat_service_running">جارٍ التقاط السجلات في الخلفية</string>
     <string name="logcat_stop">إيقاف</string>
+    <string name="logcat_capture_start">بدء الالتقاط</string>
+    <string name="logcat_capture_stop">إيقاف الالتقاط</string>
     <string name="logcat_settings">الإعدادات</string>
     <string name="logcat_keep_running">الاستمرار في الالتقاط في الخلفية (يظهر إشعار)</string>
-    <string name="logcat_auto_start">بدء الالتقاط عند فتح MP Manager</string>
     <string name="logcat_add_shortcut">إضافة إلى الشاشة الرئيسية</string>
     <string name="logcat_shortcut_old_android">تتطلب الاختصارات إصدار Android 8.0 أو أحدث</string>
     <string name="logcat_shortcut_unsupported">المشغّل لا يسمح بالاختصارات</string>

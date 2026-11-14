@@ -1972,9 +1972,10 @@
     <string name="logcat_filter_pid">Filter berdasarkan PID: %s</string>
     <string name="logcat_service_running">Merekam log di latar belakang</string>
     <string name="logcat_stop">Hentikan</string>
+    <string name="logcat_capture_start">Mulai merekam</string>
+    <string name="logcat_capture_stop">Hentikan rekaman</string>
     <string name="logcat_settings">Pengaturan</string>
     <string name="logcat_keep_running">Lanjutkan perekaman di latar belakang (notifikasi ditampilkan)</string>
-    <string name="logcat_auto_start">Mulai merekam saat MP Manager dibuka</string>
     <string name="logcat_add_shortcut">Tambahkan ke layar utama</string>
     <string name="logcat_shortcut_old_android">Pintasan memerlukan Android 8.0 atau lebih baru</string>
     <string name="logcat_shortcut_unsupported">Launcher tidak mengizinkan pintasan</string>

@@ -35,7 +35,6 @@ import io.github.abdurazaaqmohammed.utils.ShizukuManager;
 public class LogcatService extends Service implements LogcatReader.Listener {
 
     public static final String PREF_KEEP_RUNNING = "logcat_keep_running";
-    public static final String PREF_AUTO_START = "logcat_auto_start";
     public static final String ACTION_STOP = "io.github.abdurazaaqmohammed.MPManager.LOGCAT_STOP";
 
     /** Same default display limit as LogFox's logs buffer. */
@@ -124,7 +123,7 @@ public class LogcatService extends Service implements LogcatReader.Listener {
             stopSelf();
             return START_NOT_STICKY;
         }
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
     @Override
@@ -140,6 +139,7 @@ public class LogcatService extends Service implements LogcatReader.Listener {
 
     @Override
     public void onEof(String error) {
+        running = false;
         for (LogcatReader.Listener l : new ArrayList<>(listeners)) {
             l.onEof(error);
         }
@@ -178,12 +178,18 @@ public class LogcatService extends Service implements LogcatReader.Listener {
 
     @Override
     public void onDestroy() {
+        boolean notifyStopped = running;
         running = false;
-        listeners.clear();
         if (reader != null) {
             reader.stop();
             reader = null;
         }
+        if (notifyStopped) {
+            for (LogcatReader.Listener l : new ArrayList<>(listeners)) {
+                l.onEof(null);
+            }
+        }
+        listeners.clear();
         super.onDestroy();
     }
 

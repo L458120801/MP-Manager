@@ -358,7 +358,7 @@ public class FtpController {
 
     private void fetchFtpDirAndLoad(IEZFtpClient client, String path, String address, boolean pane1, boolean history) {
         if (closed || client == null || !client.isConnected()) return;
-        long generation = activity.beginNetworkPaneLoad(pane1);
+        long generation = activity.beginNetworkPaneLoad(pane1, FTPFileWrapper.folder(path, client, address));
         client.getDirectoryFileList(path, new OnEZFtpCallBack<>() {
             @Override public void onSuccess(List<EZFtpFile> response) {
                 activity.runOnUiThread(() -> {

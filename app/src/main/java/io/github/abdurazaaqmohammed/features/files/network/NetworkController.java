@@ -290,58 +290,102 @@ public final class NetworkController {
         }, () -> activity.loadFolderInPane(folder, pane1, false));
     }
 
-    /** Called by the regular pane's existing copy/move worker, including SAF sources. */
-    public void transferInto(List<Object> items, RemoteFile destination, boolean move,
-                             FileUtils.TransferListener listener) throws IOException {
-        try {
-            for (Object item : items) {
-                checkpoint();
-                if (listener != null) listener.checkpoint();
-                if (!(item instanceof File) || item instanceof io.github.abdurazaaqmohammed.MPManager.ftp.FTPFileWrapper)
-                    throw new IOException("Extract archive entries to a local folder before uploading");
-                File source = (File) item;
-                uploadSource(source, destination.connection.client, destination.entry.path, listener);
-                checkpoint();
-                if (listener != null) listener.checkpoint();
-                if (move) deleteSource(source, listener);
-            }
-        } finally { activity.handler.post(activity::refreshAllPanes); }
+    private static final class UploadPlan {
+        final File source;
+        final List<UploadPlan> children;
+        final FileUtils.Measure measure;
+
+        UploadPlan(File source, List<UploadPlan> children, FileUtils.Measure measure) {
+            this.source = source;
+            this.children = children;
+            this.measure = measure;
+        }
     }
 
-    private void uploadSource(File source, RemoteClient destination, String parent,
-                              FileUtils.TransferListener listener) throws IOException {
+    private UploadPlan prepareUpload(File source, FileUtils.TransferListener listener) throws IOException {
         checkpoint();
         if (listener != null) listener.checkpoint();
         if (!(source instanceof SafFile) && java.nio.file.Files.isSymbolicLink(source.toPath()))
             throw new IOException("Symbolic links cannot be uploaded");
+        List<UploadPlan> children = new java.util.ArrayList<>();
+        FileUtils.Measure measure = new FileUtils.Measure();
+        if (source.isDirectory()) {
+            List<? extends File> listed;
+            if (source instanceof SafFile) listed = SafFs.children((SafFile) source);
+            else {
+                File[] files = source.listFiles();
+                listed = files == null ? null : java.util.Arrays.asList(files);
+            }
+            if (listed == null) throw new IOException("Cannot read source folder: " + source.getName());
+            for (File child : listed) {
+                UploadPlan plan = prepareUpload(child, listener);
+                children.add(plan);
+                measure.files += plan.measure.files;
+                measure.bytes += plan.measure.bytes;
+            }
+            return new UploadPlan(source, children, measure);
+        }
+        measure.files = 1;
+        measure.bytes = source.length();
+        return new UploadPlan(source, children, measure);
+    }
+
+    /** Called by the regular pane's existing copy/move worker, including SAF sources. */
+    public void transferInto(List<Object> items, RemoteFile destination, boolean move,
+                             ProgressManager progress) throws IOException {
+        FileUtils.TransferListener listener = progress == null ? null : progress.listener();
+        try {
+            List<UploadPlan> plans = new java.util.ArrayList<>();
+            FileUtils.Measure measure = new FileUtils.Measure();
+            for (Object item : items) {
+                checkpoint();
+                if (listener != null) listener.checkpoint();
+                if (!(item instanceof File source) || item instanceof io.github.abdurazaaqmohammed.MPManager.ftp.FTPFileWrapper)
+                    throw new IOException("Extract archive entries to a local folder before uploading");
+                UploadPlan plan = prepareUpload(source, listener);
+                plans.add(plan);
+                measure.files += plan.measure.files;
+                measure.bytes += plan.measure.bytes;
+            }
+            if (progress != null) {
+                progress.setBytes(0L, measure.bytes);
+                progress.setItems(0, measure.files);
+            }
+            for (UploadPlan plan : plans) {
+                uploadSource(plan, destination.connection.client, destination.entry.path, listener);
+                checkpoint();
+                if (listener != null) listener.checkpoint();
+                if (move) deleteSource(plan.source, listener);
+            }
+        } finally { activity.handler.post(activity::refreshAllPanes); }
+    }
+
+    private void uploadSource(UploadPlan plan, RemoteClient destination, String parent,
+                              FileUtils.TransferListener listener) throws IOException {
+        File source = plan.source;
+        checkpoint();
+        if (listener != null) listener.checkpoint();
         String path = RemotePath.child(parent, source.getName());
         if (destination.stat(path) != null) throw new IOException("Destination already exists: " + source.getName());
         if (source.isDirectory()) {
-            List<? extends File> children;
-            if (source instanceof SafFile) children = SafFs.children((SafFile) source);
-            else {
-                File[] listed = source.listFiles();
-                children = listed == null ? null : java.util.Arrays.asList(listed);
-            }
-            if (children == null) throw new IOException("Cannot read source folder: " + source.getName());
             destination.mkdir(path);
-            for (File child : children) uploadSource(child, destination, path, listener);
-        } else {
-            if (listener != null) listener.onFile(source, new File("/network/" + path));
-            try (InputStream input = RootStaging.openInputStream(activity, source)) {
-                InputStream monitored = new java.io.FilterInputStream(input) {
-                    @Override public int read(byte[] buffer, int offset, int length) throws IOException {
-                        if (listener != null) listener.checkpoint();
-                        int count = super.read(buffer, offset, length);
-                        if (count > 0 && listener != null) listener.onBytes(count);
-                        return count;
-                    }
-                };
-                // Provider metadata may not expose a reliable length: use chunked PUT.
-                destination.upload(path, monitored, source instanceof SafFile ? -1 : source.length());
-            }
-            if (destination instanceof SmbClient && listener != null) listener.onFileComplete();
+            for (UploadPlan child : plan.children) uploadSource(child, destination, path, listener);
+            return;
         }
+        if (listener != null) listener.onFile(source, new File("/network/" + path));
+        try (InputStream input = RootStaging.openInputStream(activity, source)) {
+            InputStream monitored = new java.io.FilterInputStream(input) {
+                @Override public int read(byte[] buffer, int offset, int length) throws IOException {
+                    if (listener != null) listener.checkpoint();
+                    int count = super.read(buffer, offset, length);
+                    if (count > 0 && listener != null) listener.onBytes(count);
+                    return count;
+                }
+            };
+            // Provider metadata may not expose a reliable length: use chunked PUT.
+            destination.upload(path, monitored, source instanceof SafFile ? -1 : plan.measure.bytes);
+        }
+        if (listener != null) listener.onFileComplete();
     }
 
     private void deleteSource(File source, FileUtils.TransferListener listener) throws IOException {
@@ -361,15 +405,8 @@ public final class NetworkController {
         boolean supported = opposite.getAdapter() instanceof MainFilesArrayAdapter
                 || opposite.getAdapter() instanceof io.github.abdurazaaqmohammed.adapters.RemoteFilesArrayAdapter;
         String title = activity.getString(move ? R.string.move : android.R.string.copy);
-        boolean smbTransfer = (destination instanceof RemoteFile remote && remote.connection.client instanceof SmbClient)
-                || sources.stream().anyMatch(source -> source.connection.client instanceof SmbClient);
-        if (smbTransfer) {
-            runTransferOperation(title, (progress, listener) ->
-                    copyOutWork(sources, destination, other, supported, move, progress, listener), activity::refreshAllPanes);
-            return;
-        }
-        runOperation(title, () -> copyOutWork(sources, destination, other, supported, move, null, null),
-                activity::refreshAllPanes);
+        runTransferOperation(title, (progress, listener) ->
+                copyOutWork(sources, destination, other, supported, move, progress, listener), activity::refreshAllPanes);
     }
 
     private void copyOutWork(List<RemoteFile> sources, File destination, MainFilesArrayAdapter other,
@@ -388,17 +425,15 @@ public final class NetworkController {
 
         boolean staged = destination instanceof RemoteFile || destination instanceof SafFile;
         List<RemoteTransfers.DownloadPlan> plans = new java.util.ArrayList<>();
-        if (progress != null) {
-            FileUtils.Measure measure = new FileUtils.Measure();
-            for (RemoteFile source : sources) {
-                RemoteTransfers.DownloadPlan plan = RemoteTransfers.prepareDownload(source.connection.client, source.entry, listener);
-                plans.add(plan);
-                measure.files += plan.measure.files;
-                measure.bytes += plan.measure.bytes;
-            }
-            progress.setBytes(0L, measure.bytes * (staged ? 2 : 1));
-            progress.setItems(0, measure.files);
+        FileUtils.Measure measure = new FileUtils.Measure();
+        for (RemoteFile source : sources) {
+            RemoteTransfers.DownloadPlan plan = RemoteTransfers.prepareDownload(source.connection.client, source.entry, listener);
+            plans.add(plan);
+            measure.files += plan.measure.files;
+            measure.bytes += plan.measure.bytes;
         }
+        progress.setBytes(0L, measure.bytes * (staged ? 2 : 1));
+        progress.setItems(0, measure.files);
 
         File staging = staged ? makeStagingFolder() : null;
         try {
@@ -408,13 +443,11 @@ public final class NetworkController {
             for (int i = 0; i < sources.size(); i++) {
                 RemoteFile source = sources.get(i);
                 File local = new File(staging == null ? destination : staging, source.getName());
-                if (progress == null) RemoteTransfers.download(source.connection.client, source.entry, local);
-                if (progress != null) RemoteTransfers.download(source.connection.client, plans.get(i), local, listener, !staged);
+                RemoteTransfers.download(source.connection.client, plans.get(i), local, listener, !staged);
                 checkpoint();
                 if (listener != null) listener.checkpoint();
                 if (destination instanceof RemoteFile remote) {
-                    if (listener == null) RemoteTransfers.upload(remote.connection.client, remote.entry.path, local);
-                    if (listener != null) RemoteTransfers.upload(remote.connection.client, remote.entry.path, local, listener);
+                    RemoteTransfers.uploadPlanned(remote.connection.client, remote.entry.path, local, plans.get(i), listener);
                 }
                 if (destination instanceof SafFile saf) {
                     for (SafFile child : destinationChildren) if (child.getName().equals(source.getName()))
@@ -455,24 +488,14 @@ public final class NetworkController {
     /** A downloaded copy is intentionally local; edits require explicitly copying it back. */
     public void open(RemoteFile source, java.util.function.Consumer<File> opener) {
         File[] downloaded = {null};
-        if (source.connection.client instanceof SmbClient) {
-            runTransferOperation(activity.getString(R.string.network_downloading), (progress, listener) -> {
-                RemoteTransfers.DownloadPlan plan = RemoteTransfers.prepareDownload(source.connection.client, source.entry, listener);
-                progress.setBytes(0L, plan.measure.bytes);
-                progress.setItems(0, plan.measure.files);
-                File staging = makeStagingFolder();
-                try {
-                    downloaded[0] = new File(staging, source.getName());
-                    RemoteTransfers.download(source.connection.client, plan, downloaded[0], listener, true);
-                } catch (Exception e) { FileUtils.deleteTree(staging, null); throw e; }
-            }, () -> opener.accept(downloaded[0]));
-            return;
-        }
-        runOperation(activity.getString(R.string.network_downloading), () -> {
+        runTransferOperation(activity.getString(R.string.network_downloading), (progress, listener) -> {
+            RemoteTransfers.DownloadPlan plan = RemoteTransfers.prepareDownload(source.connection.client, source.entry, listener);
+            progress.setBytes(0L, plan.measure.bytes);
+            progress.setItems(0, plan.measure.files);
             File staging = makeStagingFolder();
             try {
                 downloaded[0] = new File(staging, source.getName());
-                RemoteTransfers.download(source.connection.client, source.entry, downloaded[0]);
+                RemoteTransfers.download(source.connection.client, plan, downloaded[0], listener, true);
             } catch (Exception e) { FileUtils.deleteTree(staging, null); throw e; }
         }, () -> opener.accept(downloaded[0]));
     }

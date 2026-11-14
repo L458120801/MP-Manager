@@ -61,7 +61,7 @@ public final class RemoteFilesArrayAdapter extends RecyclerView.Adapter<RemoteFi
         icons = new FileIconLoader(activity, false, true);
     }
 
-    @Override public boolean supportsMultiSelect() { return folder.connection.client instanceof SmbClient; }
+    @Override public boolean supportsMultiSelect() { return true; }
     @Override public boolean isMultiSelectMode() { return multiSelectMode; }
 
     public void goUp() {
