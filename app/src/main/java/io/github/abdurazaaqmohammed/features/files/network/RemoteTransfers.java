@@ -139,7 +139,8 @@ public final class RemoteTransfers {
                               DownloadPlan plan, FileUtils.TransferListener listener) throws IOException {
         if (listener != null) listener.checkpoint();
         String path = RemotePath.child(parent, source.getName());
-        if (destination.stat(path) != null) throw new IOException("Destination already exists: " + source.getName());
+        if (!(destination instanceof WebDavClient) && destination.stat(path) != null)
+            throw new IOException("Destination already exists: " + source.getName());
         if (plan.entry.directory) {
             destination.mkdir(path);
             for (DownloadPlan child : plan.children)
@@ -171,7 +172,8 @@ public final class RemoteTransfers {
                        FileUtils.TransferListener listener) throws IOException {
         if (java.nio.file.Files.isSymbolicLink(source.toPath())) throw new IOException("Symbolic links cannot be uploaded");
         String path = RemotePath.child(parent, source.getName());
-        if (destination.stat(path) != null) throw new IOException("Destination already exists: " + source.getName());
+        if (!(destination instanceof WebDavClient) && destination.stat(path) != null)
+            throw new IOException("Destination already exists: " + source.getName());
         if (source.isDirectory()) {
             File[] children = source.listFiles();
             if (children == null) throw new IOException("Cannot read source folder");

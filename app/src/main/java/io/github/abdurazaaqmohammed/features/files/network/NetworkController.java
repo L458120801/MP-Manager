@@ -366,7 +366,8 @@ public final class NetworkController {
         checkpoint();
         if (listener != null) listener.checkpoint();
         String path = RemotePath.child(parent, source.getName());
-        if (destination.stat(path) != null) throw new IOException("Destination already exists: " + source.getName());
+        if (!(destination instanceof WebDavClient) && destination.stat(path) != null)
+            throw new IOException("Destination already exists: " + source.getName());
         if (source.isDirectory()) {
             destination.mkdir(path);
             for (UploadPlan child : plan.children) uploadSource(child, destination, path, listener);
@@ -421,6 +422,22 @@ public final class NetworkController {
                 throw new IOException("Cannot copy a folder into itself");
             if (move && source.connection.client instanceof SmbClient && source.entry.path.indexOf('/') == -1)
                 throw new IOException("Cannot move a server share");
+        }
+
+        if (destination instanceof RemoteFile remote
+                && remote.connection.client instanceof WebDavClient target
+                && sources.stream().allMatch(source -> source.connection.client instanceof WebDavClient client
+                && client.canServerCopyTo(target))) {
+            progress.setItems(0, sources.size());
+            for (RemoteFile source : sources) {
+                if (listener != null) listener.checkpoint();
+                String path = RemotePath.child(remote.entry.path, source.getName());
+                if (listener != null) listener.onFile(new File("/network/" + source.entry.path), new File("/network/" + path));
+                ((WebDavClient) source.connection.client).copyResource(source.entry.path, path, source.isDirectory());
+                if (listener != null) listener.onFileComplete();
+            }
+            if (move) RemoteTransfers.deleteMovedSources(sources, listener);
+            return;
         }
 
         boolean staged = destination instanceof RemoteFile || destination instanceof SafFile;

@@ -30,6 +30,7 @@ import okio.BufferedSink;
 
 public final class WebDavClient implements RemoteClient {
     private static final String DAV = "DAV:";
+    static final int COPY_BUFFER_SIZE = 1024 * 1024;
     private static final RequestBody PROPERTIES = RequestBody.create(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?><d:propfind xmlns:d=\"DAV:\"><d:prop>"
                     + "<d:resourcetype/><d:getcontentlength/><d:getlastmodified/>"
@@ -41,8 +42,13 @@ public final class WebDavClient implements RemoteClient {
     private final HttpUrl root;
     private final OkHttpClient http;
     private final String authorization;
+    private final int copyBufferSize;
 
     public WebDavClient(String address, String username, String password) {
+        this(address, username, password, COPY_BUFFER_SIZE);
+    }
+
+    WebDavClient(String address, String username, String password, int copyBufferSize) {
         HttpUrl parsed = HttpUrl.get(address);
         if (!parsed.username().isEmpty() || !parsed.password().isEmpty()
                 || parsed.query() != null || parsed.fragment() != null) {
@@ -52,6 +58,7 @@ public final class WebDavClient implements RemoteClient {
                 ? parsed.encodedPath() : parsed.encodedPath() + "/").build();
         authorization = username.isEmpty() ? null : Credentials.basic(username, password,
                 java.nio.charset.StandardCharsets.UTF_8);
+        this.copyBufferSize = copyBufferSize;
         // Redirects are handled below, confined to this origin and collection.
         http = new OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS).writeTimeout(60, TimeUnit.SECONDS)
@@ -69,6 +76,10 @@ public final class WebDavClient implements RemoteClient {
         Request.Builder builder = new Request.Builder().url(url(path));
         if (authorization != null) builder.header("Authorization", authorization);
         return builder;
+    }
+
+    boolean canServerCopyTo(WebDavClient destination) {
+        return root.equals(destination.root) && java.util.Objects.equals(authorization, destination.authorization);
     }
 
     private static void requireSuccess(Response response) throws IOException {
@@ -261,7 +272,7 @@ public final class WebDavClient implements RemoteClient {
             requireSuccess(response);
             if (response.code() != 200) throw new IOException("Unexpected WebDAV download status: " + response.code());
             if (response.body() == null) throw new IOException("Missing WebDAV content");
-            copy(response.body().byteStream(), destination);
+            copy(response.body().byteStream(), destination, copyBufferSize);
         }
     }
 
@@ -271,7 +282,9 @@ public final class WebDavClient implements RemoteClient {
             @Override public MediaType contentType() { return MediaType.get("application/octet-stream"); }
             @Override public long contentLength() { return size; }
             @Override public boolean isOneShot() { return true; }
-            @Override public void writeTo(BufferedSink sink) throws IOException { copy(source, sink.outputStream()); }
+            @Override public void writeTo(BufferedSink sink) throws IOException {
+                copy(source, sink.outputStream(), copyBufferSize);
+            }
         };
         try (Response response = execute(request(path).header("If-None-Match", "*")
                 .put(body).build())) { requireCompletedMutation(response); }
@@ -291,6 +304,24 @@ public final class WebDavClient implements RemoteClient {
                 .header("Overwrite", "F").method("MOVE", null).build())) { requireCompletedMutation(response); }
     }
 
+    void copyResource(String path, String destination, boolean directory) throws IOException {
+        requireNonRoot(path);
+        requireNonRoot(destination);
+        HttpUrl source = url(path);
+        HttpUrl target = url(destination);
+        if (directory) {
+            if (!source.encodedPath().endsWith("/")) source = source.newBuilder().addPathSegment("").build();
+            if (!target.encodedPath().endsWith("/")) target = target.newBuilder().addPathSegment("").build();
+        }
+        Request.Builder request = request(path).url(source)
+                .header("Destination", target.toString())
+                .header("Overwrite", "F");
+        if (directory) request.header("Depth", "infinity");
+        try (Response response = execute(request.method("COPY", null).build())) {
+            requireCompletedMutation(response);
+        }
+    }
+
     @Override public void delete(String path, boolean directory) throws IOException {
         requireNonRoot(path);
         try (Response response = execute(request(path).delete().build())) {
@@ -303,7 +334,7 @@ public final class WebDavClient implements RemoteClient {
     }
 
     static void copy(InputStream source, OutputStream destination) throws IOException {
-        copy(source, destination, 1024 * 1024);
+        copy(source, destination, COPY_BUFFER_SIZE);
     }
 
     static void copy(InputStream source, OutputStream destination, int bufferSize) throws IOException {

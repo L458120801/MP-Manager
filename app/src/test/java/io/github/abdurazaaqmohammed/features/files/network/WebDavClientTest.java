@@ -7,21 +7,36 @@ import okhttp3.mockwebserver.RecordedRequest;
 import okio.Buffer;
 
 import org.junit.After;
+import org.junit.Assume;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import io.github.abdurazaaqmohammed.utils.FileUtils;
 
 import static org.junit.Assert.*;
 
 public class WebDavClientTest {
+    @Rule public TemporaryFolder temporary = new TemporaryFolder();
+
     private MockWebServer server;
     private WebDavClient client;
     private String address;
@@ -80,6 +95,30 @@ public class WebDavClientTest {
                         resources.put(path, request.getBody().readByteArray());
                         return reply(201, "");
                     }
+                    case "COPY": {
+                        assertEquals("F", request.getHeader("Overwrite"));
+                        String destination = URI.create(request.getHeader("Destination")).getPath().substring(5);
+                        if (destination.endsWith("/")) destination = destination.substring(0, destination.length() - 1);
+                        if (!resources.containsKey(path)) return reply(404, "");
+                        if (resources.containsKey(destination)) return reply(412, "");
+                        String parent = RemotePath.parent(destination);
+                        if (!resources.containsKey(parent) || resources.get(parent) != null) return reply(409, "");
+                        byte[] data = resources.get(path);
+                        if (data != null) {
+                            resources.put(destination, data.clone());
+                            return reply(201, "");
+                        }
+                        if (!"infinity".equals(request.getHeader("Depth"))) return reply(400, "");
+                        Map<String, byte[]> copied = new LinkedHashMap<>();
+                        copied.put(destination, null);
+                        for (Map.Entry<String, byte[]> entry : resources.entrySet()) {
+                            if (entry.getKey().startsWith(path + "/"))
+                                copied.put(destination + entry.getKey().substring(path.length()),
+                                        entry.getValue() == null ? null : entry.getValue().clone());
+                        }
+                        resources.putAll(copied);
+                        return reply(201, "");
+                    }
                     case "MKCOL": {
                         if (resources.containsKey(path)) return reply(405, "");
                         resources.put(path, null); return reply(201, "");
@@ -127,6 +166,133 @@ public class WebDavClientTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         client.download(name, out);
         assertArrayEquals(bytes, out.toByteArray());
+    }
+
+    @Test public void recursiveWebdavUploadAvoidsStatRoundTrips() throws Exception {
+        File folder = temporary.newFolder("tree");
+        File nested = new File(folder, "nested");
+        assertTrue(nested.mkdir());
+        Files.write(new File(folder, "top.bin").toPath(), new byte[]{1});
+        Files.write(new File(nested, "child.bin").toPath(), new byte[]{2});
+
+        RemoteTransfers.upload(client, "", folder);
+
+        assertEquals(4, server.getRequestCount());
+        List<String> methods = new ArrayList<>();
+        for (int i = 0; i < 4; i++) methods.add(server.takeRequest(5, TimeUnit.SECONDS).getMethod());
+        Collections.sort(methods);
+        assertEquals(Arrays.asList("MKCOL", "MKCOL", "PUT", "PUT"), methods);
+        assertArrayEquals(new byte[]{1}, resources.get("tree/top.bin"));
+        assertArrayEquals(new byte[]{2}, resources.get("tree/nested/child.bin"));
+    }
+
+    @Test public void stagedWebdavUploadUsesPutWithoutStat() throws Exception {
+        File source = temporary.newFile("staged.bin");
+        Files.write(source.toPath(), new byte[]{3, 4});
+        RemoteTransfers.DownloadPlan plan = new RemoteTransfers.DownloadPlan(
+                new RemoteEntry("source", false, 2, 0), List.of(), new FileUtils.Measure());
+
+        RemoteTransfers.uploadPlanned(client, "", source, plan, null);
+
+        assertEquals(1, server.getRequestCount());
+        assertEquals("PUT", server.takeRequest(5, TimeUnit.SECONDS).getMethod());
+        assertArrayEquals(new byte[]{3, 4}, resources.get("staged.bin"));
+    }
+
+    @Test public void serverSideCopyUsesOneCopyRequestAndNeverOverwrites() throws Exception {
+        byte[] bytes = {1, 2, 3};
+        resources.put("source", null);
+        resources.put("source/sub", null);
+        resources.put("source/sub/data", bytes);
+        resources.put("target", null);
+        try (WebDavClient same = new WebDavClient(address, "tester", "secret");
+             WebDavClient wrongCredentials = new WebDavClient(address, "tester", "different");
+             WebDavClient wrongCollection = new WebDavClient(server.url("/dav/other/").toString(), "tester", "secret")) {
+            assertTrue(client.canServerCopyTo(same));
+            assertFalse(client.canServerCopyTo(wrongCredentials));
+            assertFalse(client.canServerCopyTo(wrongCollection));
+
+            client.copyResource("source", "target/copied", true);
+            RecordedRequest copy = server.takeRequest(5, TimeUnit.SECONDS);
+            assertEquals("COPY", copy.getMethod());
+            assertEquals("F", copy.getHeader("Overwrite"));
+            assertEquals("infinity", copy.getHeader("Depth"));
+            assertEquals("/dav/target/copied/", URI.create(copy.getHeader("Destination")).getPath());
+            assertArrayEquals(bytes, resources.get("target/copied/sub/data"));
+
+            client.copyResource("source/sub/data", "target/copied-file", false);
+            RecordedRequest fileCopy = server.takeRequest(5, TimeUnit.SECONDS);
+            assertEquals("COPY", fileCopy.getMethod());
+            assertNull(fileCopy.getHeader("Depth"));
+            assertEquals("/dav/target/copied-file", URI.create(fileCopy.getHeader("Destination")).getPath());
+            assertArrayEquals(bytes, resources.get("target/copied-file"));
+
+            assertThrows(IOException.class, () -> client.copyResource("source", "target/copied", true));
+            assertEquals("COPY", server.takeRequest(5, TimeUnit.SECONDS).getMethod());
+            assertArrayEquals(bytes, resources.get("target/copied/sub/data"));
+        }
+    }
+
+    @Test public void compareLocalCopyBuffersWhenRequested() throws Exception {
+        Assume.assumeTrue(Boolean.getBoolean("webdav.performance")
+                || "true".equals(System.getenv("WEBDAV_PERFORMANCE")));
+        byte[] data = new byte[32 * 1024 * 1024];
+        new java.util.Random(1).nextBytes(data);
+        File payload = temporary.newFile("payload.bin");
+        Files.write(payload.toPath(), data);
+        WebDavClient baseline = new WebDavClient(address, "tester", "secret", 1024 * 1024);
+        WebDavClient candidate = new WebDavClient(address, "tester", "secret", 256 * 1024);
+        try (baseline; candidate) {
+            client.mkdir("benchmark");
+            assertEquals("MKCOL", server.takeRequest(5, TimeUnit.SECONDS).getMethod());
+            for (WebDavClient measured : new WebDavClient[]{baseline, candidate}) {
+                String path = measured == baseline ? "benchmark/warm-baseline" : "benchmark/warm-candidate";
+                try (FileInputStream input = new FileInputStream(payload)) { measured.upload(path, input, data.length); }
+                assertEquals("PUT", server.takeRequest(5, TimeUnit.SECONDS).getMethod());
+                ByteArrayOutputStream downloaded = new ByteArrayOutputStream(data.length);
+                measured.download(path, downloaded);
+                assertEquals("GET", server.takeRequest(5, TimeUnit.SECONDS).getMethod());
+                assertArrayEquals(data, downloaded.toByteArray());
+                resources.remove(path);
+            }
+
+            List<Long> currentUpload = new ArrayList<>();
+            List<Long> currentDownload = new ArrayList<>();
+            List<Long> candidateUpload = new ArrayList<>();
+            List<Long> candidateDownload = new ArrayList<>();
+            for (int run = 0; run < 5; run++) {
+                WebDavClient[] order = run % 2 == 0
+                        ? new WebDavClient[]{baseline, candidate} : new WebDavClient[]{candidate, baseline};
+                for (WebDavClient measured : order) {
+                    boolean current = measured == baseline;
+                    String path = current ? "benchmark/baseline" : "benchmark/candidate";
+                    resources.remove(path);
+                    long start = System.nanoTime();
+                    try (FileInputStream input = new FileInputStream(payload)) { measured.upload(path, input, data.length); }
+                    long elapsed = System.nanoTime() - start;
+                    assertEquals("PUT", server.takeRequest(5, TimeUnit.SECONDS).getMethod());
+                    (current ? currentUpload : candidateUpload).add(elapsed);
+
+                    ByteArrayOutputStream downloaded = new ByteArrayOutputStream(data.length);
+                    start = System.nanoTime();
+                    measured.download(path, downloaded);
+                    elapsed = System.nanoTime() - start;
+                    assertEquals("GET", server.takeRequest(5, TimeUnit.SECONDS).getMethod());
+                    assertArrayEquals(data, downloaded.toByteArray());
+                    (current ? currentDownload : candidateDownload).add(elapsed);
+                }
+            }
+            System.out.printf(Locale.ROOT,
+                    "WebDAV local fixture median MiB/s (1 MiB buffer upload/download; 256 KiB upload/download): %.1f / %.1f; %.1f / %.1f%n",
+                    medianMiBPerSecond(currentUpload, data.length), medianMiBPerSecond(currentDownload, data.length),
+                    medianMiBPerSecond(candidateUpload, data.length), medianMiBPerSecond(candidateDownload, data.length));
+        }
+    }
+
+    private static double medianMiBPerSecond(List<Long> elapsedNanos, int bytes) {
+        List<Long> sorted = new ArrayList<>(elapsedNanos);
+        Collections.sort(sorted);
+        return bytes * 1_000_000_000d / sorted.get(sorted.size() / 2) / (1024d * 1024d);
     }
 
     @Test public void emptyFilesCanBeUploadedAndDownloaded() throws Exception {
